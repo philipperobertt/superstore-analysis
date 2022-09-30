@@ -1,0 +1,2144 @@
+---
+title: "Analyzing a Superstore dataset"
+author: "Laia Porcar, Luis Marcos López, Philippe Robert"
+date: "7/9/2022"
+output:
+  html_document:
+    toc: yes
+    df_print: kable
+  pdf_document:
+    toc: yes
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(warn=-1)
+```
+
+
+The aim of this work is to analyze a dataset of purchases in an anonymous online store. The analysis will consist of data cleaning, exploratory data analysis (EDA), a simple case of linear regression, a more complete study of multiple linear regression and finally a binary classification problem.
+
+## Installs and libraries
+
+```{r, results="hide", message = FALSE}
+# Installs
+#install.packages("caret")
+#install.packages("car")
+#install.packages("ggplot2")
+#install.packages("devtools")
+#install.packages("ggcorrplot")
+#devtools::install_github("laresbernardo/lares")
+#devtools::install_github("ProcessMiner/nlcor")
+#install.packages("ISLR2")
+#devtools::install_github("kassambara/ggpubr")
+#install.packages("zoo")
+#install.packages("ROSE")
+#install.packages("e1071")
+#install.packages("klaR")
+#install.packages("treemapify")
+#install.packages("glmnet")
+
+# Libraries
+library(knitr)
+library(tidyverse)
+library(ggplot2)
+library(forcats)
+library(dplyr)
+library(ggcorrplot)
+library(lares)
+library(treemapify)
+library(MASS)
+library(devtools) 
+library(ISLR2)
+library(ggpubr)
+library(zoo)
+library(reshape2)
+library(ROSE) # for undersampling/oversampling
+library(e1071) # for naive Bayes
+library(caret)
+library(klaR)
+library(car) # for calculation of VIF in multiple linear regression
+library(glmnet)
+library(choroplethr)
+library(choroplethrMaps)
+library(kableExtra)
+library(magrittr)
+
+```
+
+## Importing Dataset
+
+The dataset has been obtained from Kaggle, the famous data science platform. It is publicly available for educational purposes and has been downloaded as csv file for ease of use. It consists of 9994 purchases made from an anonymous online store and contains the following features:
+
+Row ID => Unique ID for each row.<br>
+Order ID => Unique Order ID for the purchase.<br>
+Order Date => Order Date of the product.<br>
+Ship Date => Shipping Date of the product.<br>
+Ship Mode=> Shipping Mode specified by the customer.<br>
+Customer ID => Unique ID to identify the customer.<br>
+Customer Name => Name of the customer.<br>
+Segment => The segment to which the customer belongs.<br>
+Country => Country where the purchase was made.<br>
+City => City where the purchase was made.<br>
+State => State where the purchase was made.<br>
+Postal Code => Postal Code of the customer.<br>
+Region => Region where the customer belongs.<br>
+Product ID => Unique ID of the product.<br>
+Category => Category of the product ordered.<br>
+Sub-Category => Sub-Category of the product ordered.<br>
+Product Name => Name of the product.<br>
+Sales => Sales of the product.<br>
+Quantity => Quantity of the product.<br>
+Discount => Discount provided.<br>
+Profit => Profit/Loss incurred.<br>
+
+```{r results = 'asis'}
+# Read the dataset
+df <- read.csv("~/Luis/Universidad/Master_DS/Second_semester/Statistical_Learning/Project/Sample-Superstore.csv",header=TRUE)
+#kable(df[1:5,])
+
+df[1:15,] %>%
+  kable(format = "html", col.names = colnames(df)) %>%
+  column_spec(c(2:21), width_min = "0.8in")  %>%
+  kable_styling() %>%
+  kableExtra::scroll_box(width = "100%", height = "300px")
+
+
+```
+
+## Data cleaning
+
+In this section we will carry out the cleaning of the data. First of all we will check basic information, such as missing values (in the form of NaN, NA and Null), duplicates, number of unique values and determine which columns can be removed and which can be modified or created. After, we will focus our efforts on determining outliers.
+
+### Basic data cleaning
+
+With a summary of the data we can know important information about each feature, such as its class, its mean, quartiles, maximum and minimum.
+
+```{r}
+summary(df)
+```
+
+Check if there are Na and NAN:
+
+```{r}
+is.null(df)
+sum(is.na(df))
+sum(is.nan(as.matrix(df)))
+```
+
+There are no missing values of any type. This is certainly not very surprising since most datasets available in Kaggle for educational use have usually gone through some sort of cleaning beforehand. Therefore, this means that for now we still have the 9994 examples available.
+
+Number of duplicates:
+
+```{r}
+sum(duplicated(df))
+```
+
+No duplicates present. Same reasoning as for missing values apply. 
+
+Let's have a look at the unique values in each column.
+
+```{r}
+cat(paste("Sub.Category: ", length(unique(df[["Sub.Category"]])) ), sep="\n")
+cat(paste("Category: ", length(unique(df[["Category"]]))), sep="\n")
+cat(paste("Country: ", length(unique(df[["Country"]]))), sep="\n")
+cat(paste("Region: ", length(unique(df[["Region"]]))), sep="\n")
+cat(paste("State: ", length(unique(df[["State"]]))), sep="\n")
+cat(paste("City: ", length(unique(df[["City"]]))), sep="\n")
+cat(paste("Ship.Mode: ", length(unique(df[["Ship.Mode"]]))), sep="\n")
+cat(paste("Customer.ID: ", length(unique(df[["Customer.ID"]]))), sep="\n")
+cat(paste("Order.ID: ", length(unique(df[["Order.ID"]]))), sep="\n")
+```
+
+It's shown that there are 17 different sub-categories grouped in 3 categories, 532 cities belonging to 49 states and 4 regions, 4 ship modes and 793 different customers. Having 9994 orders and 793 customers means a good quantity of those customers (if not all) have purchased more than one subcategory or made more than one order. Different subcategory products bought together will be found in different rows of the dataset, even though they share the same order number. This conclusion can be drawn from the number of unique orders, which is slightly bigger than half of the number of purchases and the fact that there are no duplicates . This is all good information that we can use later in the Exploratory Data Analysis section.  
+
+We can get rid of some columns. The name of the customer is not very useful when we already have a unique customer ID for each client. This is also a good practice to maintain the anonymity of customers. The Country column is also not relevant since there is only data for the USA. And finally the postal code column won't be needed since we will not carry our analysis in such detail and with the city and state columns it will be enough.
+
+```{r}
+df = df[-c(1,7,9,12)]
+```
+
+Convert date columns to date format:
+
+```{r}
+df$Order.Date <- as.Date(df$Order.Date, format = "%m/%d/%Y")
+df$Ship.Date <- as.Date(df$Ship.Date, format = "%m/%d/%Y")
+```
+
+Next, we can create some useful columns. For example, if we subtract the *Order.Date* from the *Ship.Date* we get the *Processing.Time*, this is, how much time the store needed to ship the product since it was ordered. The gross margin is also useful to have, it is calculated as the ratio of *Profit* to *Sales* multiplied by 100 (in %). Finally, we can separate the *Order.Date* column into three other columns for the year, the month and the information concerning the year and month.
+
+```{r}
+df$Order.Year <- format(df$Order.Date,"%Y")
+df$Order.Year <- as.numeric(df$Order.Year)                                
+df$Order.Month <- format(df$Order.Date,"%m")
+df$Order.Month <- as.numeric(df$Order.Month)
+df$Order.Year_month <- format(df$Order.Date,"%Y-%m")
+df$Order.Year_month <- as.Date(paste(df$Order.Year_month,"-15",sep=""))
+df$Order.Date <- as.numeric(df$Order.Date)
+df$Processing.Time <- df$Ship.Date - df$Order.Date
+df$Processing.Time <- as.numeric(df$Processing.Time)
+df$Gross.Margin <- (df$Profit/df$Sales)*100
+```
+
+Let's have a look at the final structure of the data after doing the aforementioned modifications.
+
+```{r}
+summary(df)
+```
+
+### Outliers detection
+
+Let's have a look again at the summary of columns that could potentially have some outliers.
+
+```{r}
+summary(df$Sales)
+summary(df$Quantity)
+summary(df$Discount)
+summary(df$Profit)
+summary(df$Processing.Time)
+summary(df$Order.Year)
+summary(df$Gross.Margin)
+summary(df$Order.Date)
+```
+
+By checking the maximum and minimum values it is hard to tell if there could be outliers, since, even though in some cases the maxima are a bit far from the 3rd quartile, they are all possible values for the quantities they describe.
+
+Let's plot the numerical variables to have a look at their distribution.
+
+```{r warning = FALSE, message = FALSE, fig.height=32, fig.width=32, dev = "png", dpi = 300}
+
+hst_Sales <- ggplot(df) + aes(x = Sales) + 
+geom_histogram(color="white", fill="#80b1d3", bins = 100) + 
+labs(title="", x="Sales", y="Frequency") +
+theme_minimal()+ 
+theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), title = element_text(size = 16))
+
+hst_Quantity <- ggplot(df) + aes(x = Quantity) + 
+geom_histogram(color="white", fill="#80b1d3", bins = 14) + 
+labs(title="", x="Quantity", y="Frequency") + 
+theme_minimal()+ 
+theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),
+  title = element_text(size = 16))
+
+hst_Discount <- ggplot(df) + aes(x = Discount) + 
+geom_histogram(color="white", fill="#80b1d3", bins = 9) + 
+labs(title="", x="Discount", y="Frequency") + 
+theme_minimal()+ 
+theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),
+  title = element_text(size = 16))
+
+hst_Profit <- ggplot(df) + aes(x = Profit) + 
+geom_histogram(color="white", fill="#80b1d3", bins = 120) + 
+labs(title="", x="Profit", y="Frequency") + 
+theme_minimal()+ 
+theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),
+  title = element_text(size = 16))
+
+hst_Processing <- ggplot(df) + aes(x = Processing.Time) + 
+geom_histogram(color="white", fill="#80b1d3", bins = 8)  + 
+labs(title="", x="Processing time", y="Frequency") +
+theme_minimal()+  
+theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),
+  title = element_text(size = 16))
+
+hst_Year <- ggplot(df) + aes(x = Order.Year) + 
+geom_histogram(color="white", fill="#80b1d3", bins = 4)  + 
+labs(title="", x="Years", y="Frequency") + 
+theme_minimal()+ 
+theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),
+  title = element_text(size = 16))
+
+################################################################################
+
+require(gridExtra)
+grid.arrange(hst_Sales, hst_Quantity, hst_Year, hst_Discount, hst_Processing, hst_Profit, ncol = 2, nrow = 3)
+```
+
+Processing time, Years, Discount and Quantity look fine. The latter presents some right skewness but for our criteria is not a case of possible outliers. The Sales and profit plots require some transformation before being able to draw a conclusion. A log transformation should do the work.
+
+
+```{r message = FALSE, fig.height=26, fig.width=32, dev = "png", dpi = 300}
+df_positive_profit <- df %>% filter(Profit >= 0)
+df_negative_profit <- df %>% filter(Profit < 0)
+
+plot1 <- ggplot(df_positive_profit) + aes(x = log(Profit)) + 
+  geom_histogram(color="white", fill="#80b1d3",  bins = 12) + 
+  labs(title="", x="Log(Pos. Profit)", y="Frequency") + 
+  theme_minimal()+ 
+  theme(axis.text=element_text(size=24), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28), title = element_text(size = 16))
+
+plot2 <- ggplot(df_negative_profit) + aes(x = log(-Profit)) + 
+  geom_histogram(color="white", fill="#80b1d3", bins = 12) + 
+  labs(title="", x="Log(Neg. Profit)", y="Frequency") + 
+  theme_minimal()+ 
+  theme(axis.text=element_text(size=24), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28), title = element_text(size = 16))
+
+
+plot3 <- ggplot(df) + aes(x = log(Sales)) + 
+  geom_histogram(color="white", fill="#80b1d3", bins = 30) + 
+  labs(title="", x="log(Sales)", y="Frequency") + 
+  theme_minimal()+ 
+  theme(axis.text=element_text(size=24), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28), title = element_text(size = 16))
+
+
+df_profit <- df[!(df$Profit < 600 & df$Profit >= -600 ),]
+plot4 <- ggplot(df_profit) + aes(x = Profit) + 
+  geom_histogram(color="white", fill="#80b1d3") + 
+  labs(title="", x="Profit (omitting central values)", y="Frequency") + 
+  theme_minimal()+ 
+  theme(axis.text=element_text(size=24), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28), title = element_text(size = 16))
+
+################################################################################
+
+
+require(gridExtra)
+grid.arrange(plot1, plot2, plot3, plot4, ncol = 2, nrow = 2)
+```
+
+
+The log of *Sales* looks pretty Gaussian to the eye and the skewness is gone. The variable *Profit* presents both negative and positive values, therefore we separate them both in two histograms, taking the absolute value of the negative one. We also show the *Profit* distribution without any transformation but hiding the central highest values so the the tails are easier to see. There seem to be no strong indications of the presence of outliers for any of the quantities.
+
+Finally, we can check the box plots of all numeric variables. Box plots are one of the most useful tools in outliers identification. 
+
+```{r message = FALSE, fig.height=26, fig.width=32, dev = "png", dpi = 300}
+
+plot1 <- ggplot(df, aes(y = Quantity)) + 
+  geom_boxplot(color="black", fill="#80b1d3") + theme_minimal() +
+  theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), title = element_text(size = 16))
+
+plot2 <- ggplot(df, aes(y = Discount)) + 
+  geom_boxplot(color="black", fill="#80b1d3") + theme_minimal() +
+  theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), title = element_text(size = 16))
+
+plot3 <- ggplot(df, aes(y = Sales)) + 
+  geom_boxplot(color="black", fill="#80b1d3") + theme_minimal() +
+  theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), title = element_text(size = 16))
+
+plot4 <- ggplot(df, aes(y = Profit)) + 
+  geom_boxplot(color="black", fill="#80b1d3") + theme_minimal() +
+  theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), title = element_text(size = 16))
+
+plot5 <- ggplot(df, aes(y = Processing.Time)) + 
+  geom_boxplot(color="black", fill="#80b1d3") + theme_minimal() +
+  theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), title = element_text(size = 16))
+
+# Alternatively we can also separate the quantitative variable per the qualitative one, for example:
+
+plot6 <- ggplot(df, aes(x = Category, y = Discount)) + 
+  geom_boxplot(color="black", fill="#80b1d3") + theme_minimal() +
+  theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), title = element_text(size = 16))
+
+plot7 <- ggplot(df, aes(x = Region, y = Sales)) + 
+  geom_boxplot(color="black", fill="#80b1d3") + theme_minimal() +
+  theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), title = element_text(size = 16))
+
+plot8 <- ggplot(df, aes(x = Category, y = Profit)) + 
+  geom_boxplot(color="black", fill="#80b1d3") + theme_minimal() +
+  theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), title = element_text(size = 16))
+
+################################################################################
+
+require(gridExtra)
+grid.arrange(plot1, plot2, plot3, plot4, plot5, plot6, plot7, plot8, ncol = 4, nrow = 2)
+```
+
+Except for *Processing Time*, there are potential outliers in almost all variables. *Sales* and *Profits* stand out. *Quantity* and *Discount* present a few possible outliers. As seen at the beginning, the maximum discount corresponds to 0.8, which although rare, it is a value that can occur on specific occasions. The maximum value of *Quantity* is 14, which is also perfectly possible, especially in the case of items that are purchased in large quantities and also given that we have several types of customers. Those buying for their business or company would be expected to buy in larger quantities.
+
+For these reasons and those stated above, we believe that we do not have enough information about the store and its functioning to be able to really determine if some of the purchases made can be classified as outliers. In the absence of a safe and definitive criterion, we chose not to eliminate any of the potential outlier points.
+
+## Relevant questions
+
+As a starting point to develop the following sections of the work, we will try to answer the following questions.
+
+* Which subcategories are more popular? Are those the ones that generate more profit?
+
+* Do different segments prefer different ship modes?
+
+* In which states are there more orders? And in which cities? Do they correspond to the ones that generate more profit?
+
+* Which is the top-10 clients according to purchases and to which segment do they belong? Are they the ones that generate more profit? 
+
+* Is there a difference  between the profit generated by each segment in the different categories?  And between the profit generated in each region in each category? 
+
+* Does the quantity of products bought change in each category when there is a discount? 
+
+* How does the profit change for different discount ranges? What would be a threshold discount for positive/negative profits?
+
+* How do orders behave throughout the year? Can we identify some patterns?
+
+* Do sales and profits behave similarly for every month?
+
+* Which segment is generating more sales? In which region?
+
+* Do we observe a different behavior for holiday periods (November and December in the USA)?
+
+* What is the relation between profit and sales? Is it linear?
+
+* How accurately can we estimate this relation?
+
+* How accurately can we predict future profits based on sales?
+
+* What features are more relevant when determining the profit?
+
+* Is there any interaction among the different features?
+
+* Is it possible to predict if a purchase will result on positive or negative profit? Which features are more relevant for this task? How accurate is the prediction?
+
+## Exploratory Data Analysis
+
+```{r}
+summary(df)
+```
+
+### Analysis of discrete variables
+
+First of all let's see the proportion that each subcategory represents in general and inside each category. We can see that *Binders*, *Paper*, *Furnishing* and *Phones* (in that order) are the more popular subcategories. The less popular ones are *Copiers* and *Machines*, followed by *Bookcases*, *Envelopes*, *Fasteners* and *Supplies*. When talking about categories, *Office Supplies* is the most represented one. Both *Technology* and *Furniture* have a similar number of items.
+
+```{r, message = FALSE, fig.height=22, fig.width=32, dev = "png", dpi = 300}
+plotdata <- df %>% count(Sub.Category) %>% arrange(desc(Sub.Category)) %>%
+      mutate(prop = round(n*100/sum(n), 1), lab.ypos = cumsum(prop) - 0.5*prop)
+
+plotdata$label <- paste0(plotdata$Sub.Category, "\n", round(plotdata$prop), "%")
+
+plot1 <- ggplot(plotdata, aes(x = "", y = prop, fill = Sub.Category)) +
+  geom_bar(width = 1, stat = "identity", color = "white") +
+  coord_polar(theta = "y", start = 1.4, direction = -1) +
+  theme(legend.position = "FALSE", axis.text=element_text(size=32))+
+  scale_y_continuous(breaks=cumsum(plotdata$prop) - plotdata$prop / 2, 
+  labels= plotdata$label) + labs(y = "", x = "", title = "") + theme_minimal()+   theme(axis.text=element_text(size=24), axis.title.x = element_text(size =28),   axis.title.y = element_text(size = 28), legend.text = element_text(size =24),
+  legend.title = element_text(size =28))
+
+
+################################################################################
+
+df_cat <- df %>% group_by(Category, Sub.Category) %>% summarize(count=n())
+
+plot2 <- ggplot(df_cat, aes(area=count, label=Sub.Category, fill=Category, subgroup=Category))+
+    geom_treemap()+
+    geom_treemap_subgroup_border(colour = "white", size = 5)+
+    geom_treemap_subgroup_text(color='white', alpha=0.3, size=48,
+    place='center', fontface='bold')+
+    geom_treemap_text(color='white', place='center', size=34) +
+    theme(legend.text = element_text(size = 24), 
+    legend.title = element_text(size = 28))
+
+################################################################################
+
+require(gridExtra)
+grid.arrange(plot1, plot2, ncol = 2, nrow = 1)
+
+```
+
+Now we will construct a set of useful barplots to understand better some relations between the features in the dataset. First, we plot the top-15 states and cities where more orders are made. California, New York and Texas are the states that make the most orders. Most of these states belong to the top-15 most populated states in the USA for the years of interest. Regarding the top-15 cities, they are mostly, as expected, cities of the states where more orders have been made. Los Angeles and New York City are the top-2 since they are also the most populated cities in the USA. The most bought category for all states and cities is *Office Supplies*.    
+
+The most popular shipping mode is *Standard Class* for all segments, followed by *Second Class* and *First Class*. This is also true for each category. The amount of orders belonging to the *Office Supplies* category is more than the sum of the orders of the two other categories.   
+
+The south region presents the lowest amount of orders while the west region the most. *Consumer* is the type of client that more orders make for each region and *Home Office* the one that makes less.
+
+Regarding the profit, East and West are the regions that more profit generate. *Consumer* type of clients represent the most profit but also the most losses.  
+
+```{r, message = FALSE, fig.height=36, fig.width=32, dev = "png", dpi = 300}
+top_states <- tail(names(sort(table(df$State))),15)
+df_top_states <- df %>% filter(df$State %in% top_states)
+plot1 <- ggplot(df_top_states, aes(x = State, fill = Category)) + 
+  geom_bar(position = "stack", bins = 15) + 
+  labs(title="", x="State", y="Orders") + 
+  theme_minimal()+ 
+  theme(axis.text=element_text(size=24), axis.text.x = element_text(angle=45),
+  axis.title.x = element_text(size =28),   axis.title.y=element_text(size=28),
+  plot.title = element_text(size = 24, hjust = 0.5), 
+  legend.text = element_text(size = 24), legend.title = element_text(size =28)) +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))
+
+################################################################################
+
+top_cities <- tail(names(sort(table(df$City))),15)
+df_top_cities <- df %>% filter(df$City %in% top_cities)
+plot2 <- ggplot(df_top_cities, aes(x = City, fill = Category)) + 
+  geom_bar(position = "stack", bins = 15) + 
+  labs(title="", x = "City", y="Orders") + 
+  theme_minimal() + 
+  theme(axis.text=element_text(size=24), axis.text.x = element_text(angle=45), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size=28),
+    plot.title = element_text(size = 24, hjust = 0.5), 
+    legend.text = element_text(size = 24), legend.title = element_text(size=28))+
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))
+
+
+################################################################################
+
+df2 <- df %>% group_by(Category)
+plot3 <- ggplot(data = df2,aes(Category, fill=`Ship.Mode`))+
+  geom_bar(position = 'stack')+
+  labs(title='', x='Category', y='Orders') +
+  theme_minimal() + 
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28),
+    plot.title = element_text(size = 24, hjust = 0.5),  
+    legend.text = element_text(size = 24), legend.title = element_text(size =28)) +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))
+
+################################################################################
+
+df2 <- df %>% group_by(Segment)
+plot4 <- ggplot(data = df2, aes(Segment, fill=`Ship.Mode`))+
+  geom_bar(position = 'stack')+
+  labs(title='', x='Segment', y='Orders') +
+  theme_minimal() + 
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28),  
+    plot.title = element_text(size = 24, hjust = 0.5),  
+    legend.text = element_text(size = 24), legend.title = element_text(size=28))+
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))
+
+################################################################################
+
+df2 <-df %>% group_by(Region)
+plot5 <- ggplot(data = df2, aes(Region, fill=`Segment`))+
+  geom_bar(position = 'stack')+
+  theme_minimal() + 
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 24, hjust = 0.5),  
+    legend.text = element_text(size = 24), legend.title = element_text(size=28))+
+  labs(title='', x='Region', y='Orders') +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))
+
+  
+################################################################################
+
+plot6 <- ggplot(df, aes(x=Region, y=Profit, fill = Segment)) + 
+  geom_bar(stat = "identity") + labs(x="Region", y="Profit") + theme_minimal() + 
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 16, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))+
+  scale_y_continuous(label = scales::dollar)+
+  geom_hline(yintercept=0, linetype="dashed")
+
+
+################################################################################
+
+require(gridExtra)
+grid.arrange(plot1, plot2, plot3, plot4, plot5, plot6, ncol = 2, nrow = 3)
+```
+
+In the next plots we represent the total number of orders, sales and profit generated in each month. During the last months of the year both sales and orders are higher than at the beginning. Up to  three times more orders and sales are made in November and December as compared to January and February. Also, both positive and negative profits increase towards the last months of the year. The number of orders also increase throughout the years and the proportions of the shipping mode used remain the same.
+
+```{r, message = FALSE, fig.height=28, fig.width=32, dev = "png", dpi = 300}
+# Purchases, sales and benefits for years and months. In what months do people usually buy more? 
+# Are the sales generally increasing over time? Are there more sales on Christmas, Black Friday...?
+
+plot1 <- ggplot(df, aes(x=Order.Month, fill = Category))+ 
+  geom_bar(position = "stack", bins = 12)+ 
+  labs(title="", x = "Month", y="Orders")+ 
+  theme_minimal() +  
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 24, hjust = 0.5),  
+    legend.text = element_text(size = 24), legend.title = element_text(size=28))+
+  scale_x_discrete(limits= seq(1,12))+ 
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))
+
+################################################################################
+
+plot2 <- ggplot(df, aes(x=Order.Month, y=Sales, fill = Category))+ 
+  geom_bar(stat = "identity", bins = 12) + labs(title="", x="Month", y="Sales") + 
+  theme_minimal() + theme(axis.text=element_text(size=24), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),
+    plot.title = element_text(size = 16, hjust = 0.5), 
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) + 
+  scale_x_discrete(limits= seq(1,12)) + scale_y_continuous(label = scales::dollar) +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))
+
+################################################################################
+
+plot3 <- ggplot(df, aes(x=Order.Month, y= Profit, fill = Category))+
+  geom_bar(stat = "identity") + labs(title="", x="Month", y="Profit") + 
+  theme_minimal() + theme(axis.text=element_text(size=24), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),
+    plot.title = element_text(size = 16, hjust = 0.5), 
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) + 
+  scale_x_discrete(limits= seq(1,12)) + scale_y_continuous(label = scales::dollar) +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))+
+  geom_hline(yintercept=0, linetype="dashed")
+
+################################################################################
+# Is there any preference on shipment methods over the years?
+
+plot4 <- ggplot(df, aes(x=Order.Year, fill = Ship.Mode))+ 
+  geom_bar(position = "stack",  bins = 4)+ 
+  labs(title="", x = "Year", y="Orders")+ 
+  theme_minimal()+ 
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 24, hjust = 0.5),  
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))
+
+require(gridExtra)
+grid.arrange(plot2, plot1, plot3, plot4, ncol = 2, nrow = 2)
+```
+
+Next off, we study which subcategories represent the highest profits (sum of positive and negative) and which the highest losses (sum of positive and negative). Copiers belong to the top-5 subcategories that generate positive profit, but it is one of the least popular subcategories as we saw at the beginning of this section. Tables and Machines are subcategories that need to be closely watched given their losses are very high.
+
+```{r, message = FALSE, fig.height=22, fig.width=32, dev = "png", dpi = 300}
+df_subcat <- df %>% group_by(Sub.Category) %>% summarise(prof = sum(Profit))
+df_subcat <- df_subcat[order(df_subcat$prof),]
+top_subcat_neg <- head(df_subcat$Sub.Category, 5)
+top_subcat_pos <- tail(df_subcat$Sub.Category, 5)
+df_top_pos <- df %>% filter(Sub.Category %in% top_subcat_pos)
+
+plot_top_pos <- ggplot(df_top_pos, aes(x = Sub.Category, y = Profit, fill = Segment)) + 
+  geom_bar(stat="identity", position = "stack", bins = 5) + 
+  labs(x = "Subcategory", y= "Profit") + 
+  theme_minimal() + scale_y_continuous(label = scales::dollar) +
+  theme(axis.text=element_text(size=24), axis.text.x = element_text(angle=45), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 38, hjust = 0.5), 
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+  ggtitle("Top subcategories with positive profit") +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))+
+  geom_hline(yintercept=0, linetype="dashed")
+  
+  
+################################################################################
+
+df_top_neg <- df %>% filter(Sub.Category %in% top_subcat_neg)
+
+plot_top_neg <- ggplot(df_top_neg, aes(x = Sub.Category, y = Profit, fill = Segment)) + 
+  geom_bar(stat = "identity", position = "stack", bins = 5) + 
+  labs(x = "Subcategory", y= "Profit") + scale_y_continuous(label = scales::dollar) +
+  theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.text.x = element_text(angle=45), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 38, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+  ggtitle("Top subcategories with negative profit") +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))+
+  geom_hline(yintercept=0, linetype="dashed")
+
+################################################################################
+
+require(gridExtra)
+grid.arrange(plot_top_pos, plot_top_neg, ncol = 2, nrow = 1)
+```
+
+
+#### Total orders by state
+
+In the map presented below we can see which of the states are associated with a highest number of orders. This information completes the one given earlier about the top-10 states regarding the number of orders. As expected, the most populated states are those where more orders are made: California, Texas, Florida, New York, Pennsylvania... Likewise, the most sparse are associated with a smaller number of purchases.
+
+```{r, message = FALSE, fig.height=8, fig.width=8, fig.align="center"}
+df_mapusa <- df %>% group_by(State)
+df_mapusa <- df_mapusa %>% summarize(orders = n())
+df_mapusa$region <- tolower(df_mapusa$State)
+df_mapusa$value <- df_mapusa$orders
+continental_us_states <- names(table(df_mapusa$region))
+
+state_choropleth(df_mapusa, num_colors=9, zoom = continental_us_states) +
+  scale_fill_brewer(palette="YlOrBr") +
+  labs(fill = "Total orders") 
+
+```
+
+#### Total profit by state
+
+We can now check which states generate the most and the least profit and study if they are related to the ones where more purchases were made. Indeed, some states as California and New York and Washington generate both big profit and number of orders. Nevertheless, states as Florida, Texas, Pennsylvania and Colorado despite being associated with high number of purchases generate very low or negative profit. Also remarkable is that states like Nevada and Montana generate a decent amount of profits although they are states where not many purchases are made.
+
+```{r, message = FALSE, fig.height=8, fig.width=8, fig.align="center"}
+df_mapusa <- df %>% group_by(State) %>% summarize(profitss = sum(Profit))
+df_mapusa$region <- tolower(df_mapusa$State)
+df_mapusa$value <- df_mapusa$profitss
+continental_us_states <- names(table(df_mapusa$region))
+
+state_choropleth(df_mapusa, num_colors=9, zoom = continental_us_states) +
+  scale_fill_brewer(palette="YlOrBr") +
+  labs(fill = "Total profit") 
+
+```
+
+#### Analysis of holiday and preholiday periods
+
+Next we see how the store has done in the four years our data covers, by studying how sales and profits have behaved (left barplot below). During the first two years the number of sales remained constant, while the profit increased slightly, proving the store was able to improve their gross margin. Next two years both sales and profits grew to a greater extent.
+
+We are also interested in analyzing what impact the holiday season in the USA (last two months of the year) has on the number of orders (right barplot below). First, there is an increase in the number of orders throughout the years for both periods. Furthermore, the number of orders during holiday season is almost half of the number for the rest of the year; maintaining this constant relationship over the years. Notice that we are comparing two months against 10. Therefore holiday season has a big impact on the number of orders that are made in the store.
+
+
+```{r, message = FALSE, fig.height=18, fig.width=32, dev = "png", dpi = 300}
+Sales_per_year <- df %>%  group_by(Order.Year) %>% summarise(s = sum(Sales))
+
+Profit_per_year <- df %>% group_by(Order.Year) %>% summarise(p = sum(Profit))
+
+Sales <- Sales_per_year$s
+Profit <- Profit_per_year$p
+Years <- c("2014", "2015", "2016", "2017")
+
+df_growthsales_profit <- data.frame(Sales, Profit, Years)
+df_growthsales_profit2 <- melt(df_growthsales_profit, id.vars="Years")
+
+plot_year <- ggplot(df_growthsales_profit2, aes(x=Years, y=value, fill=variable))+
+  geom_bar(stat="identity", position="dodge") + 
+  labs(title="Sales and Profit per year", x = "Years", y="USD") + 
+  theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 38, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) + 
+  scale_fill_manual(values = c("#da6474", "#80b1d3", "#fdb462", "#7fc97f"))
+
+
+###############################################################################
+
+Order_preholiday <- df %>% filter(Order.Month %in% 1:10) %>% 
+                    group_by(Order.Year) %>% summarise(ord = n())
+
+Order_holiday <- df %>% filter(Order.Month %in% 11:12) %>% 
+                 group_by(Order.Year) %>% summarise(ord1= n())  
+
+Pre_holiday <- Order_preholiday$ord
+Holiday <- Order_holiday$ord1
+Years <- c("2014", "2015", "2016", "2017")
+
+df_growthorder <- data.frame(Pre_holiday, Holiday, Years)
+df_growthorder2 <- melt(df_growthorder, id.vars='Years')
+
+plot_hol <- ggplot(df_growthorder2, aes(x=Years, y=value, fill=variable)) +
+    geom_bar(stat='identity', position='dodge') + 
+    labs(title="Orders Pre-Holiday vs Holiday", x = "Years", y="Orders") + 
+    theme_minimal() +
+    theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+      axis.title.y = element_text(size = 28), 
+      plot.title = element_text(size = 38, hjust = 0.5),
+      legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+    scale_fill_manual(values = c("#da6474", "#80b1d3", "#fdb462", "#7fc97f" ))
+
+################################################################################
+
+require(gridExtra)
+grid.arrange(plot_year, plot_hol, ncol = 2, nrow = 1)
+```
+
+
+Similar to the analysis carried out before, we can check how sales and profits generated by each category behave over the years. The first thing that catches our attention is the fact that the profit has increased over the years for the *Office Supply* and *Technology* categories, but not for *Furniture*, for which it has fluctuated around the same value. However, sales generally show a tendency to increase over the years. Both *Office Supplies* and *Technology* have very similar behavior.
+
+```{r, message = FALSE, fig.height=14, fig.width=32, dev = "png", dpi = 300}
+Technology_sales <- df %>% filter(str_detect(Category, 'Technology')) %>%
+  group_by(Order.Year) %>% summarise(Sales_technology = sum(Sales))
+
+ Technology_profit <- df %>% filter(str_detect(Category, "Technology")) %>%
+   group_by(Order.Year) %>% summarise(Profit_technology = sum(Profit))
+
+Years <- c("2014", "2015", "2016", "2017")
+Sales <- Technology_sales$Sales_technology
+Profit <- Technology_profit$Profit_technology
+
+df_technology_sp <- data.frame(Sales, Profit, Years)
+df_technology_sp2 <- melt(df_technology_sp, id.vars="Years")
+
+plot_technology <- ggplot(df_technology_sp2, aes(x=Years, y=value, fill=variable)) +
+  geom_bar(stat="identity", position="dodge") + 
+  labs(title="Sales and Profit for Technology", x = "Years", y="USD") + 
+  theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 38, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+  scale_fill_manual(values = c("#da6474", "#80b1d3", "#fdb462", "#7fc97f" ))
+
+############################################################################
+
+Furniture_sales <- df %>% filter(str_detect(Category, 'Furniture')) %>%
+  group_by(Order.Year) %>% summarise(Sales_furniture = sum(Sales))
+
+Furniture_profit <- df %>% filter(str_detect(Category, "Furniture")) %>%
+  group_by(Order.Year) %>% summarise(Profit_furniture = sum(Profit))
+
+Profit <- Furniture_profit$Profit_furniture
+Sales <- Furniture_sales$Sales_furniture
+
+df_furniture_sp <- data.frame(Sales, Profit, Years)
+df_furniture_sp2 <- melt(df_furniture_sp, id.vars="Years")
+
+plot_furniture <- ggplot(df_furniture_sp2, aes(x=Years, y=value, fill=variable)) +
+  geom_bar(stat="identity", position="dodge") + 
+  labs(title="Sales and Profit for Furniture", x = "Years", y="USD") + 
+  theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 38, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+  scale_fill_manual(values = c("#da6474", "#80b1d3", "#fdb462", "#7fc97f" ))
+
+#############################################################################
+
+Office_supplies_sales <- df %>% filter(str_detect(Category, 'Office Supplies')) %>%
+  group_by(Order.Year) %>% summarise(Sales_office_supplies = sum(Sales))
+
+Office_supplies_profit <- df %>% filter(str_detect(Category, "Office Supplies")) %>%
+   group_by(Order.Year) %>% summarise(Profit_office_supplies = sum(Profit))
+
+Profit <- Office_supplies_profit$Profit_office_supplies
+Sales <- Office_supplies_sales$Sales_office_supplies
+
+df_office_supplies_sp <- data.frame(Sales, Profit, Years)
+df_office_supplies_sp2 <- melt(df_office_supplies_sp, id.vars="Years")
+
+plot_office <- ggplot(df_office_supplies_sp2, aes(x=Years, y=value, fill=variable)) +
+   geom_bar(stat="identity", position="dodge") + 
+   labs(title="Sales and Profit for Office Supplies", x = "Years", y="USD") +
+   theme_minimal() +
+   theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 38, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+   scale_fill_manual(values = c("#da6474", "#80b1d3", "#fdb462", "#7fc97f" ))
+
+################################################################################
+
+require(gridExtra)
+grid.arrange(plot_technology, plot_furniture, plot_office, ncol = 3, nrow = 1)
+
+```
+
+
+[cell below]
+
+Following we will analyze four plots that would help us understand how the profit changes for different categories, regions and segments as well as the relation between discount and quantity bought. 
+
+```{r, message = FALSE, fig.height=28, fig.width=32, dev = "png", dpi = 300}
+df1 <- df %>% group_by(Segment,Category) %>% summarise(n=median(Profit))
+plot1 <- ggplot(df1, aes(Segment, Category, fill=n))+
+  scale_fill_distiller( direction = 1)+ geom_tile(color='white')+
+  geom_text(aes(label=paste(round(n,0),'$')), color = 'black', size=10)+
+  labs(title='', fill='Median Profit') + theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 16, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28))
+
+################################################################################
+
+df2 <- df %>% group_by(Region,Category) %>% summarise(n=median(Profit))
+plot2 <- ggplot(df2, aes(Region, Category, fill=n))+
+  scale_fill_distiller( direction = 1)+ geom_tile(color='white')+
+  geom_text(aes(label=paste(round(n,0),'$')), color = 'black', size=10)+
+  labs(title='', fill='Median Profit') + theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 16, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28))
+
+################################################################################
+
+# df3 <- df %>% mutate(Discount = cut_width(Discount,0.2,boundary=0))
+df3 <- df %>% mutate(Discount = cut(Discount, c(0, 0.1, 0.2, 0.8), include.lowest = TRUE))
+df3 <- df3 %>% group_by(Discount, Sub.Category) %>% summarise(n = mean(Quantity))
+
+plot3 <- ggplot(df3, aes(Discount, Sub.Category, fill= n))+
+  scale_fill_distiller( direction = 1) + geom_tile(color='white')+
+  geom_text(aes(label=paste(round(n,2))), color = 'black', size=10)+
+  labs(title='', x = "Discount", fill='Avg. Quantity') + theme_minimal() + 
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 16, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28))
+
+
+################################################################################
+df4 <- df %>% mutate(Discount = cut_width(Discount,0.15,boundary=0))
+df4 <- df4 %>% group_by(Discount)
+
+plot4 <- ggplot(df4, aes(x=Discount, y= Profit, fill = Category))+
+  geom_bar(stat = "identity", position = "stack") + labs(title="", x="Discount", y="Profit") + 
+  theme_minimal()+
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 16, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+  scale_y_continuous(label = scales::dollar) +
+  scale_fill_manual(values = c("#da6474", "#80b1d3", "#fdb462", "#7fc97f" )) +
+  geom_hline(yintercept=0, linetype="dashed")
+
+################################################################################
+
+require(gridExtra)
+grid.arrange(plot1, plot2, plot3, plot4, ncol = 2, nrow = 2)
+
+```
+
+
+**Top left**<br>
+The median profit generated by each segment oscillates around the same value for each category, and is much bigger for *Technology* than for *Office Supplies* and *Furniture*. 
+
+**Top right**<br>
+West is the region where the median profit is highest, although in South both *Technology* and *Furniture* present the same median values. For the Central region, *Furniture* has a negative median profit and *Office Supplies* shows the smallest positive median profit across all regions and categories.
+
+**Bottom left**<br>
+For some subcategories there is no difference in the quantity bought whether there is a discount or not; clients buy the same quantity on average. For other subcategories, like *Binders*, *Bookcases* and *Fasteners* the quantity bought tends to increase with an increasing discount.
+
+**Bottom right**<br>
+Profit changes when a discount is applied and we can observe that from 30% discount the profit starts turning negative.
+
+### Top 10 clients analysis
+
+A study of the best and worst clients for the store is important to understand how to maximize the profits and take care of the clients, but also to know how to minimize the losses. The first barplot represents the top-10 clients according to purchases over the four years. The amount of orders they made is around 30, being the customer with client ID *WB-21850* the one that more orders has made. These clients make most of their purchases on the office supplies category. Also, 6 out of 10 of these clients are *Consumer* type of client.
+
+Next step is to analyze the top-10 clients that generate more profit and more losses (middle left and right barplots respectively). The "most profitable" clients generate around 5000 USD each, being *TC-20980* (*Corporate*) the best client according to profit generation. Most of their purchases are on the technology category for some clients and office supplies for others. Six out of ten of these clients belong to the *Consumer* segment.
+
+Clients that generate the largest negative profit cause losses that range from 2000 to 6500 USD approximately. By far, the client that causes the more losses is *CS-12505* (*Consumer*). As with the most profitable clients, the losses are usually related to the technology and office supplies categories. Only two of these clients are from the *Home Office* segment, four from the *Consumer* segment and four from the *Corporate* segment.
+
+We can observe that the top-10 clients according to orders made, generate in general less than 5 times the profit that the most "profitable" clients generate. In fact, some of them generate negative profit. This is important to check, because it's not profitable to have a client that makes many purchases but at the end causes losses.
+
+Finally, we plot the top-10 clients that more money spend. It is remarkable to see that none of the clients that generate the more profit is in the list of clients that more money spend. There is one client in this list however, that is also in the top-10 clients that more purchases have made. This client is the one who more money has spent over the four years and he/she belongs to the *Corporate* segment.
+
+```{r, message = FALSE, fig.height=32, fig.width=32, dev = "png", dpi = 300}
+top_buyers <- tail(names(sort(table(df$Customer.ID))), 10)
+df_top_buyers <- df %>% filter(df$Customer.ID %in% top_buyers)
+
+segment_purch <- df_top_buyers %>% group_by(Customer.ID, Segment) %>% 
+  summarize(Sales = sum(Sales), Profit = sum(Profit), Number.Orders = n())
+#kable(segment_purch[1:10,])
+segment_purch[1:10,] %>%
+  kable() %>%
+  kable_styling(full_width = F)
+
+plot_top <- ggplot(df_top_buyers, aes(x = Customer.ID, fill = Category)) + 
+  geom_bar(position = "stack",bins = 10) + 
+  labs(x = "Clients", y="Orders") +
+  theme_minimal() + 
+  theme(axis.text=element_text(size=24), axis.text.x = element_text(angle=45), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),     plot.title = element_text(size = 38, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) + 
+  ggtitle("Top 10 clients according to purchases") +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f")) 
+  
+
+################################################################################
+
+plot_top_profit <- ggplot(df_top_buyers, aes(x = Customer.ID, y = Profit, fill = Category)) + 
+  geom_bar(stat="identity", position = "stack", bins = 10) + 
+  labs(x = "Clients", y="Profit") + 
+  theme_minimal() + 
+  theme(axis.text=element_text(size=24), axis.text.x = element_text(angle=45), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),
+    plot.title = element_text(size = 38, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+  ggtitle("Top 10 clients according to purchases") +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))+
+  scale_y_continuous(label = scales::dollar)+
+  geom_hline(yintercept=0, linetype="dashed")
+
+################################################################################
+
+df_profit <- df %>% group_by(Customer.ID) %>% summarise(prof = sum(Profit))
+df_profit <- df_profit[order(df_profit$prof),]
+top_profit_neg <- head(df_profit$Customer.ID, 10)
+top_profit_pos <- tail(df_profit$Customer.ID, 10)
+
+df_top_pos <- df %>% filter(Customer.ID %in% top_profit_pos)
+
+segment_prof_pos <- df_top_pos %>% group_by(Customer.ID, Segment) %>% 
+  summarize(Sales = sum(Sales), Profit = sum(Profit), Number.Orders = n())
+segment_prof_pos[1:10,] %>%
+  kable() %>%
+  kable_styling(full_width = F)
+
+
+plot_top_pos <- ggplot(df_top_pos, aes(x = Customer.ID, y = Profit, fill = Category)) + 
+  geom_bar(stat="identity", position = "stack", bins = 10) + 
+  labs(x = "Clients", y="Profit") + 
+  theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.text.x = element_text(angle=45), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),
+    plot.title = element_text(size = 38, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+  ggtitle("Top 10 clients with net positive profit") +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))+
+  scale_y_continuous(label = scales::dollar)+
+  geom_hline(yintercept=0, linetype="dashed")
+
+################################################################################
+
+df_top_neg <- df %>% filter(df$Customer.ID %in% top_profit_neg)
+
+segment_prof_neg <- df_top_neg %>% group_by(Customer.ID, Segment) %>% 
+  summarize(Sales = sum(Sales), Profit = sum(Profit), Number.Orders = n())
+segment_prof_neg[1:10,] %>%
+  kable() %>%
+  kable_styling(full_width = F)
+
+
+plot_top_neg <- ggplot(df_top_neg, aes(x = Customer.ID, y = Profit, fill = Category)) + 
+  geom_bar(stat = "identity", position = "stack", bins = 10) + 
+  labs(x = "Clients", y="Profit") + 
+  theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.text.x = element_text(angle=45), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),
+    plot.title = element_text(size = 38, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+  ggtitle("Top 10 clients with net negative profit") +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))+
+  scale_y_continuous(label = scales::dollar)+
+  geom_hline(yintercept=0, linetype="dashed")
+
+################################################################################
+
+df_sales <- df %>% group_by(Customer.ID) %>% summarise(sales = sum(Sales))
+df_sales <- df_profit[order(df_sales$sales),]
+top_sales <- tail(df_sales$Customer.ID, 10)
+
+df_top_sales <- df %>% filter(Customer.ID %in% top_sales)
+
+segment_sales <- df_top_sales %>% group_by(Customer.ID, Segment) %>% 
+  summarize(Sales = sum(Sales), Profit = sum(Profit), Number.Orders = n())
+segment_sales[1:10,] %>%
+  kable() %>%
+  kable_styling(full_width = F)
+
+
+plot_sales <- ggplot(df_top_sales, aes(x = Customer.ID, y = Sales, fill = Category)) + 
+  geom_bar(stat="identity", position = "stack", bins = 10) + 
+  labs(x = "Clients", y="Sales") + 
+  theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.text.x = element_text(angle=45), 
+    axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),
+    plot.title = element_text(size = 38, hjust = 0.5),
+    legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+  ggtitle("Top 10 clients according to sales") +
+  scale_fill_manual(values = c("#da6474","#80b1d3", "#fdb462", "#7fc97f"))+
+  scale_y_continuous(label = scales::dollar)
+
+################################################################################
+
+require(gridExtra)
+grid.arrange(plot_top, plot_top_profit, plot_top_pos, plot_top_neg, plot_sales, ncol = 2, nrow = 3)
+```
+
+
+
+### Analysis of continuous variables
+
+In this section we intend to analyze how the different continuous variables behave with respect to the profit. We will see the distribution of *Profit* with respect to *Sales*, *Time*, *Month* and *Quantity*. Also we will plot *Quantity* vs *Discount*. Therefore, this section will be heavy on scatter plots, but their analysis is fundamental to find important relations in the continuous variables.
+
+But first, let's start by looking at how profit and sales change over time. The two plots on the left of the next figure shows how the profit and sales tend to increase over time. The two plots on the right show a moving average of the last three months. Now, it's possible to see much better how there are cycles for sales and profit. They start low at the beginning of each year and keep increasing until November and December, after which they drop again.
+
+```{r, message = FALSE, fig.height=32, fig.width=32, dev = "png", dpi = 300}
+by_yearmonth <- df %>% group_by(Order.Year_month)
+sales_year_tot <- by_yearmonth %>% summarize(Sales_year_tot=sum(Sales))
+
+plot1 <- ggplot(sales_year_tot, aes(x = Order.Year_month, y = Sales_year_tot)) +
+  geom_line(size = 1.5, color = "lightgrey") + geom_smooth() + 
+  geom_point(size = 6, color = "#80b1d3") + theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 16, hjust = 0.5)) +
+  geom_point(size = 5, color = "#80b1d3") + labs(y = "Total sales", x = "Time")+
+  scale_y_continuous(label = scales::dollar)
+
+################################################################################
+
+
+df_fullyear <- df %>% group_by(Order.Year_month) %>%
+  summarise(m2 = mean(Sales), mx2 = max(Sales), mn2 = min(Sales) ,su2 = sum(Sales))
+
+df_fullyear$Moving_average <- rollapply(df_fullyear$su2, 3, mean, align = "right", fill = NA)
+
+df_fullyear[1,"Moving_average"] = df_fullyear[1,"su2"]
+df_fullyear[2,"Moving_average"] = sum(df_fullyear[1,"su2"], df_fullyear[2,"su2"])/2 
+#since the moving average is with the past 3 months, the first two row are NA.
+# the above lines find a workaround
+
+plot2 <- ggplot(df_fullyear, aes(x = Order.Year_month, y = Moving_average)) +
+  geom_line(size = 1.5, color = "lightgrey") + geom_smooth() +
+  geom_point(size = 6, color = "#80b1d3") + theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 16, hjust = 0.5)) +
+  labs(y = "Avg. sales of last 3 months", x = "Time") + 
+  scale_y_continuous(label = scales::dollar)
+
+################################################################################
+
+by_yearmonth <- df %>% group_by(Order.Year_month)
+profit_year_tot <- by_yearmonth %>% summarize(Profit_year_tot=sum(Profit))
+
+plot3 <- ggplot(profit_year_tot, aes(x = Order.Year_month, y = Profit_year_tot)) +
+  geom_line(size = 1.5, color = "lightgrey") + geom_smooth() +
+  geom_point(size = 6, color = "#80b1d3") + theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 16, hjust = 0.5)) +
+  labs(y = "Total profit", x = "Time")+
+  scale_y_continuous(label = scales::dollar)
+
+################################################################################
+
+
+df_fullyear <- df %>% group_by(Order.Year_month) %>%
+  summarise(m2 = mean(Profit), mx2 = max(Profit), mn2 = min(Profit) ,su2 = sum(Profit))
+
+df_fullyear$Moving_average <- rollapply(df_fullyear$su2, 3, mean, align = "right", fill = NA)
+
+df_fullyear[1,"Moving_average"] = df_fullyear[1,"su2"]
+df_fullyear[2,"Moving_average"] = sum(df_fullyear[1,"su2"], df_fullyear[2,"su2"])/2 
+#since the moving average is with the past 3 months, the first two row are NA.
+# the above lines find a workaround
+
+plot4 <- ggplot(df_fullyear, aes(x = Order.Year_month, y = Moving_average)) +
+  geom_line(size = 1.5, color = "lightgrey") + geom_smooth() +
+  geom_point(size = 6, color = "#80b1d3") + theme_minimal() + 
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28), 
+    plot.title = element_text(size = 16, hjust = 0.5)) +
+  labs(y = "Avg. profit of last 3 months", x = "Time")+
+  scale_y_continuous(label = scales::dollar)
+
+################################################################################
+
+require(gridExtra)
+grid.arrange(plot1, plot2, plot3, plot4, ncol = 2, nrow = 2)
+
+```
+
+
+
+#### Profit vs Sales
+
+The *Profit* vs *Sale* distribution has a fan shape, indicating that more sales does not necessarily implies more profit. Sometimes the profit tends to decrease. This behavior is observed for the three categories. 
+
+```{r, message = FALSE, fig.height=5, fig.width=7, fig.align="center"}
+ggplot(df, aes(x = Sales,  y = Profit, color=Category)) +
+  geom_point(size = 2, alpha=.8) +
+  scale_x_continuous(label = scales::dollar) +
+  scale_y_continuous(label = scales::dollar) +
+  labs(x = "Sales", y = "Profit")+
+  theme_minimal() + theme(axis.text=element_text(size=6), 
+  axis.title.x = element_text(size = 10), axis.title.y = element_text(size = 10),
+  legend.text = element_text(size = 6), legend.title = element_text(size=10))
+```
+
+If we now analyze the same distribution but independently for each sub category we will see that some still preserve the fan shape, but others such as *Art*, *Copiers*, *Envelopes*, *Paper* and *Labels* show an always increasing profit when the sales increase. Furthermore we can see that, when classifying by discount it is possible to discern for which discount ranges the profit decreases when the sales increase. Based on this, a number of suggestions we can make to the store are:
+
+* Avoid discounts over 40% for Furnishings.
+* Avoid discounts over 30% for Phones.
+* Avoid discounts over 60% for Binders.
+* Maximum discount recommended for Supplies, Tables and Bookcases is 10%.
+
+
+```{r, message = FALSE, fig.height=32, fig.width=32, dev = "png", dpi = 300}
+# Cut width of Discount
+df_disc <- df %>% mutate(Discount=cut_width(Discount,0.10,boundary=0))
+
+df1 <- df_disc 
+plot1 <- ggplot(df1, aes(x = Sales,  y = Profit, color=Discount)) +
+  geom_point(size = 5, alpha=.8) +
+  facet_wrap(~Sub.Category, scales = "free") +
+  scale_x_continuous(label = scales::dollar) +
+  scale_y_continuous(label = scales::dollar) +
+  labs(x = "Sales", y = "Profit") + theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28),
+  axis.text.x = element_text(angle=45),
+  axis.title.y = element_text(size = 28), strip.text = element_text(size = 28),
+  legend.text = element_text(size = 24), legend.title = element_text(size=28))
+
+require(gridExtra)
+grid.arrange(plot1, ncol = 1, nrow = 1)
+```
+
+#### Profit vs Time
+
+The *Profit* vs *Time* analysis shows there is in general a positive relation for both orders and profit. With orders we can also see there is a cycle. For the first two months of the year the orders are at their lowest level. Then there is an increase in the number of orders, that is kept for the following seven months. Finally, it increases again for the last three months of the year, being November the month where the peak is reached every year. Profit, however does not show this cycle so clearly.
+
+```{r, message = FALSE, fig.height=16, fig.width=32, dev = "png", dpi = 300}
+# Profit over time
+df_plot <- df %>% group_by(Order.Year_month)
+df_plot <- df_plot %>% summarize(profitt = sum(Profit))
+
+plot1 <- ggplot(df_plot, aes(x = Order.Year_month, y = profitt)) +
+  geom_point(color="#80b1d3", size = 6, alpha=.8) +
+  scale_y_continuous(label = scales::dollar) +
+  labs(x = "Time", y = "Total profit")+
+  geom_smooth(method = "lm") + theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), plot.title = element_text(size = 38, 
+  hjust = 0.5), legend.text = element_text(size = 24), 
+  legend.title = element_text(size=28)) + stat_cor(method = "pearson", size = 10)
+
+######################################################################
+
+# Orders over time
+df_plot <- df %>% group_by(Order.Year_month)
+df_plot <- df_plot %>% summarize(orders = n())
+
+plot2 <- ggplot(df_plot, aes(x = Order.Year_month, y = orders)) +
+  geom_point(color="#80b1d3", size = 6, alpha=.8) +
+  scale_y_continuous(label = scales::dollar) +
+  labs(x = "Time", y = "Total orders")+
+  geom_smooth(method = "lm") + theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), plot.title = element_text(size = 38, 
+  hjust = 0.5), legend.text = element_text(size = 24), 
+  legend.title = element_text(size=28)) + stat_cor(method = "pearson", size = 10)
+
+#######################################################################
+
+require(gridExtra)
+grid.arrange(plot1, plot2, ncol = 2, nrow = 1)
+```
+
+If we take this analysis to each subcategory, it can be seen that *Supplies*, *Machines* and *Tables* show in general a decrease in the profit. In some of them it is possible to sense the cycle that we talked about before, such is the case of *Appliances*, *Fasteners* and *Phones*.
+
+```{r, message = FALSE, fig.height=32, fig.width=32, dev = "png", dpi = 300}
+#BY SUBCATEGORIES
+df_plot_SC <- df %>% group_by(Sub.Category, Order.Year_month)
+df_plot_SC <- df_plot_SC %>% summarize(profit = sum(Profit))
+
+ggplot(df_plot_SC, aes(x = Order.Year_month,  y = profit)) +
+  geom_point(color="#80b1d3", size = 5, alpha=.8) +
+  facet_wrap(~Sub.Category, scales = "free") +
+  scale_y_continuous(label = scales::dollar) +
+  #geom_hline(yintercept=0, color="#da6474", size=0.5)+
+  labs(x = "Time", y = "Profit")+
+  geom_smooth(method = "lm")+
+  theme_minimal()+ theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),
+  strip.text = element_text(size = 28), 
+  legend.text = element_text(size = 24), legend.title = element_text(size=28)) +
+  stat_cor(method = "pearson", size = 7)
+
+#BY STATE
+df_plot_SC <- df %>% group_by(State, Order.Year_month)
+df_plot_SC <- df_plot_SC %>% summarize(profit = sum(Profit))
+
+ggplot(df_plot_SC, aes(x = Order.Year_month,  y = profit)) +
+  geom_point(color="#80b1d3", size = 5, alpha=.8) +
+  facet_wrap(~State, scales = "free") +
+  scale_y_continuous(label = scales::dollar) +
+  #geom_hline(yintercept=0, color="#da6474", size=0.5)+
+  labs(x = "Time", y = "Profit")+
+  geom_smooth(method = "lm")+
+  theme_minimal() + theme(axis.text=element_text(size=24), 
+  axis.title.x = element_text(size = 28), axis.title.y = element_text(size = 28),
+  strip.text = element_text(size = 28), axis.text.x = element_text(angle=45),
+  legend.text = element_text(size = 24),  legend.title = element_text(size=28))
+```
+
+Grouping by state we can observe that some of the states don't have enough data to draw conclusions from (*DC*, *N. Dakota*, *W. Virginia*), others show a decreasing behavior that should be payed attention to (*Arkansas*, *Iowa*, *Minnesota*) and others show a good positive increase of the profit over time (*California*, *New York*). 
+
+#### Profit vs Month
+
+This analysis would help us confirm the cycle observed before. First months of the year come along with lower profits, which increase towards the end of the year. This is indeed what is observed for all subcategories except for *Machines* and possibly *Supplies* and *Tables*. Most of the states show this behavior as well, except for *Ordegon*, *Tennessee* and *Georgia*. Knowing this could potentially help the store address better the clients of each state, to know when to launch campaigns of offers and discounts for instance.
+
+```{r, message = FALSE, fig.height=32, fig.width=32, dev = "png", dpi = 300}
+#BY SUBCATEGORIES
+df_plot_SC <- df %>% group_by(Sub.Category, Order.Month)
+df_plot_SC <- df_plot_SC %>% summarize(profit = sum(Profit))
+
+ggplot(df_plot_SC, aes(x = Order.Month,  y = profit)) +
+  geom_point(color="#80b1d3", size = 5, alpha=.8) +
+  facet_wrap(~Sub.Category, scale = "free") +
+  scale_y_continuous(label = scales::dollar) +
+  labs(x = "Month", y = "Profit") +
+  geom_smooth(method = "lm") + theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), strip.text = element_text(size = 28))+
+  stat_cor(method = "pearson", size = 7)+
+  scale_x_discrete(limits= seq(1,12), breaks = function(x){x[c(TRUE, FALSE)]})
+
+#BY STATE
+df_plot_SC <- df %>% group_by(State, Order.Month)
+df_plot_SC <- df_plot_SC %>% summarize(profit = sum(Profit))
+
+ggplot(df_plot_SC, aes(x = Order.Month,  y = profit)) +
+  geom_point(color="#80b1d3", size = 5, alpha=.8) +
+  facet_wrap(~State, scale = "free") +
+  scale_y_continuous(label = scales::dollar) +
+  labs(x = "Month", y = "Profit") +
+  geom_smooth(method = "lm") + theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), strip.text = element_text(size = 28))+
+  scale_x_discrete(limits= seq(1,12), breaks = function(x){x[c(TRUE, FALSE)]})
+```
+
+
+#### Profit vs Quantity
+
+This is also an interesting relation to see. For most of the sub categories an increase in the amount of items (of the same product) bought leads to a decrease in profit. One of the reasons could be that buyers take advantage of discounts to buy in bigger quantities, hence the profit would be less when compared to single item orders when no discount was present. Or simply the store offers more discounts when the quantity bought is bigger. Next section will try to answer to this. 
+
+```{r, message = FALSE, fig.height=32, fig.width=32, dev = "png", dpi = 300}
+#BY SUBCATEGORIES
+df_plot_SC <- df %>% group_by(Sub.Category, Quantity)
+df_plot_SC <- df_plot_SC %>% summarize(profit = sum(Profit))
+
+ggplot(df_plot_SC, aes(x = Quantity,  y = profit)) +
+  geom_point(color="#80b1d3", size = 5, alpha=.8) +
+  facet_wrap(~Sub.Category, scale = "free") +
+  scale_y_continuous(label = scales::dollar) +
+  #geom_hline(yintercept=0, color="#da6474", size=0.5)+
+  labs(x = "Quantity", y = "Profit") +
+  geom_smooth(method = "lm") + theme_minimal() + 
+    theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), strip.text = element_text(size = 28)) +  stat_cor(method = "pearson", size = 7)
+```
+
+#### Quantity vs Discount
+
+There is not enough data to draw conclusions properly, since the number of discounts is rather small. However, for *Binders* and *Bookcases* bigger discounts imply bigger quantities. For *Tables* the opposite behavior seems to be the case.
+
+```{r, message = FALSE, fig.height=22, fig.width=32, dev = "png", dpi = 300}
+#BY SUBCATEGORIES
+df_plot_SC <- df %>% group_by(Sub.Category, Discount)
+df_plot_SC <- df_plot_SC %>% summarize(quantity = mean(Quantity))
+
+ggplot(df_plot_SC, aes(x = Discount,  y = quantity)) +
+  geom_point(color="#80b1d3", size = 5, alpha=.8) +
+  facet_wrap(~Sub.Category, scale = "free") +
+  labs(x = "Discount", y = "Quantity") +
+  geom_smooth(method = "lm") + theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), strip.text = element_text(size = 28)) +
+  stat_cor(method = "pearson", size = 7)
+
+
+```
+
+Finally we can see in general lines that two types of customers benefit from discounts when they buy more items or they buy bigger quantities because they are in discount. Those are *Corporate* and *Home Office*.
+
+```{r, message = FALSE, fig.height=14, fig.width=32, dev = "png", dpi = 300}
+
+ #BY SEGMENT
+df_plot_SC <- df %>% group_by(Segment, Discount)
+df_plot_SC <- df_plot_SC %>% summarize(quantity = mean(Quantity))
+
+ggplot(df_plot_SC, aes(x = Discount,  y = quantity)) +
+  geom_point(color="#80b1d3", size = 6, alpha=.8) +
+  facet_wrap(~Segment, scale = "free") +
+  labs(x = "Discount", y = "Quantity") +
+  geom_smooth(method = "lm") + theme_minimal() +
+  theme(axis.text=element_text(size=24), axis.title.x = element_text(size = 28), 
+  axis.title.y = element_text(size = 28), strip.text = element_text(size = 28)) + stat_cor(method = "pearson", size = 7)
+
+```
+
+### Correlation analysis
+
+The correlation matrix can be seen below. The highest correlation is given between *Gross Margin* and *Discount* and it is a negative correlation. It makes sense that the more discounts the store offers the lower the gross margin is since it is proportional to profit and inversely proportional to sales. The biggest the discount, the lower the profit. Same analysis explains the negative correlation between *Discount* and *Profit*. Sales and Profit have a 0.48 positive correlation, indicating that profit tends to increase with sales in general.
+
+Also noticeable are the positive correlations between *Profit* and *Gross Margin* and between *Quantity* and *Sales*. The more items are bought of a certain product, the more sales it generates. 
+
+```{r, message = FALSE, fig.height=5, fig.width=5, fig.align="center"}
+dat <- df[,c("Sales","Profit","Gross.Margin" , "Discount", "Quantity", "Processing.Time", "Order.Year")]
+colnames(dat) <- c("Sales", "Profit","Gross.Margin", "Discount", "Quantity", "Processing.Time", "Year")
+
+df_corr <- dplyr::select_if(dat, is.numeric)
+corr_coef <- cor(df_corr, use="complete.obs")
+round(corr_coef,2)
+
+ggcorrplot(corr_coef, hc.order = TRUE, type = "lower", lab = TRUE)
+
+```
+
+We also use another library to output the 8 biggest correlations with a p-value < 0.05. The results agree with what was explained before.
+
+```{r, message = FALSE, fig.height=5, fig.width=5, fig.align="center"}
+dat <- df[, c("Sales","Profit","Gross.Margin" , "Discount", "Quantity", "Processing.Time", "Order.Year")]
+colnames(dat) <- c("Sales", "Profit","Gross.Margin", "Disc.", "Quantity", "Processing.Time", "Year")
+
+corr_cross(dat, max_pvalue = 0.05, top = 8, color=c("#da6474", "#80b1d3"))
+
+```
+
+
+
+## Linear Regression
+
+In this section we will address a simple linear regression problem before we get into a deeper analysis with multiple linear regression.
+
+The original idea was to do linear regression on *Profit* vs *Sales* in general. However they are not very correlated and the shape of the distribution clearly indicates there is no linear relation. Hence, based on the EDA we realized that there seems to be a good relation between these to features for sub categories such as *Envelopes*, *Copiers*, *Paper* and *Art*. We have chosen *Envelopes* to model its behavior with linear regression.
+
+First, we do a train-test split with a train set size of 80%.
+
+```{r, message = FALSE}
+df_envelop <- df %>% filter(`Sub.Category`=='Labels')
+
+row.number <- sample(1:nrow(df_envelop), 0.8*nrow(df_envelop))
+train = df_envelop[row.number,]
+test = df_envelop[-row.number,]
+dim(train)
+dim(test)
+```
+
+Proceed to fit the model and print summary information.
+
+```{r, message = FALSE, fig.height=5, fig.width=5}
+lm.fit <- lm(Profit ~ Sales, data = train)
+summary(lm.fit)
+confint(lm.fit)
+```
+
+The $R^2$ equals 0.96, which means the independent variable is able to explain most of the variance in the dependent variable. Also, the F-statistic is quite bigger than one and its p-value very close to zero, meaning there is indeed evidence of a relation between both variables. The estimate of 0.46 gives us the expected change in *Profit* due to a unit change in *Sales*.
+
+A plot of the fit can be seen next:
+
+```{r, message = FALSE, fig.height=5, fig.width=5, fig.align="center", dev = "png", dpi = 300}
+ggplot(train, aes(x = Sales, y = Profit)) +
+  geom_point(color="#80b1d3", size = 2, alpha=.9) +
+  scale_y_continuous(label = scales::dollar) +
+  scale_x_continuous(label = scales::dollar) +
+  labs(x = "Sales", y = "Profit") + theme_minimal() +
+  theme(axis.text=element_text(size=8), axis.title.x = element_text(size = 12), 
+  axis.title.y = element_text(size = 12)) + geom_abline(slope = coef(lm.fit)[["Sales"]], 
+  intercept = coef(lm.fit)[["(Intercept)"]])
+
+```
+
+Let's now have a look at the diagnostic plots.
+
+```{r, message = FALSE, fig.height=10, fig.width=10, dev = "png", dpi = 300}
+par(mfrow = c(2, 2))
+plot(lm.fit)
+```
+
+*Fitted vs Residual*<br>
+Residuals plots are useful to tell whether linearity and homoskedasticity hold. For linearity we expect the red line to be close to zero, while for the homoskedasticity the spread of the residuals should be approximately the same across the x axis.From the above plot, we can see that the red trend starts very close to zero but then diverges away from it. We are able to see some pattern in the data: for an increase of the fitted values some residuals increase while tend to decrease. So neither linearity nor homoskedasticity are really met. There are three potential outliers.
+
+*Normal Q-Q*<br>
+In this plot we expect to see all points close to the dotted line. If this was not the case, the residuals and therefore the errors aren't Gaussian. Thus for small sample sizes, it can't be assumed that the estimator $\hat{\beta}$ is Gaussian either, meaning the standard confidence intervals and significance tests are invalid. Our plot shows most points lying on the dotted line, however the rightmost and leftmost points are already far from it, suggesting strong right and left skewness. 
+
+*Scale-Location*<br>
+This kind of plot is ideal to check for homoskedasticity. We expect the red line to be approximately horizontal, and since this is not the case for our model, it means that the average magnitude of the standardized residuals is changing considerably as a function of the fitted values. The spread around the red line should not vary with the fitted values and again, this is happening in our plot. Therefore, we have another evidence for heteroskedasticity. 
+
+*Residuals vs Leverage*<br>
+Leverage measures how sensitive a fitted $\hat{y_{i}}$ is to a sense in the true response $y_{i}$. When we look at the Residuals vs Leverage plot we expect that the spread of standardized residuals won't change as a function of leverage. In our plot however we see it increases. This is another proof of heteroskedasticity.Finally, points beyond the Cook's distance have a large leverage and deleting them would have a big influence.
+
+By the previous analysis, we can conclude that our data is not behaving linearly as we expected and it does not have homoskedasticity. We could tackle these problems by doing some transformations on the data, like taking the logarithm or the square root of the response, but in this case we have both positive and negative values, which would make the problem unnecessarily difficult and actually introduce more non-linearity and heteroskedasticity. We can't assume however that the standard errors of the intercept and *Sales* are valid, given the aforementioned assumptions are not met.
+
+<!-- We can see that transforming the response variable by taking its natural logarithm does not solve the problem of homoskedasticity. Instead it accentuates the problem of -->
+
+<!-- ```{r, message = FALSE, fig.height=10, fig.width=10} -->
+<!-- lm.fit <- lm(log(Profit) ~ Sales, data = train) -->
+<!-- par(mfrow = c(2, 2)) -->
+<!-- plot(lm.fit) -->
+<!-- ``` -->
+
+To assert how the model generalizes we predict the values of the test set and calculate the RMSE. RMSE explains on an average how much of the predicted values will differ from the actual values. For a more meaningful comparison we calculated the normalized RMSE.
+
+```{r, message = FALSE}
+pred <- predict(lm.fit, newdata = test)
+rmse <- sqrt(sum((pred - test$Profit)^2)/length(test$Profit))
+normalized_rmse <- 100* rmse/(max(train$Profit)-min(train$Profit))
+cat(paste("RMSE =", rmse))
+cat(paste("\nNormalized RMSE =", normalized_rmse, "%"))
+```
+
+The shown normalized RMSE is low enough to consider the fit as good.
+
+
+## Multiple linear regression
+
+In this section we will train a regression model using multiple features. As part of the process we will select the most important features for the model using backward selection and also check how well it performs on a test set.
+
+First, we separate our data in train and test sets, with a ratio of 80%-20% respectively.
+
+```{r, message = FALSE}
+set.seed(1)
+row.number <- sample(1:nrow(df), 0.8*nrow(df))
+train = df[row.number,]
+test = df[-row.number,]
+dim(train)
+dim(test)
+```
+
+Next we carry out the construction of a first model, having into account 9 features that could potentially have a good impact on training and using 5-fold cross validation to enhance the performance.
+
+```{r, message = FALSE}
+lm_mult = train(
+  form = Profit ~ Sales + Quantity + Segment + Discount + Processing.Time + Ship.Mode + Region + Sub.Category + Gross.Margin,
+  data = train,
+  trControl = trainControl(method = "cv", number = 5),
+  method = "lm"
+)
+
+lm_mult
+summary(lm_mult)
+```
+
+To test the relationship between predictor and response variables we will use hypothesis testing. 
+
+$$H_{0} : \beta_{1} = \beta_{2} = ··· = \beta_{10} = 0$$
+$$H_{a} \text{: at least one } \beta_{j} \text{ is non-zero.}$$
+
+The F stat of 156.8 (>> 1) and a p-value of nearly zero, gives clear evidence against the null hypothesis. At least one of the selected features must be related to *Profit*. 
+
+Judging by the p-value of the predictor variables we can determine which are more significant. The lesser the p-value the more significant the variable is. Features such as *Processing.Time*, *Ship.Mode* and *Segment* are not significant for our model.
+
+The multiple $R^2$ indicates how much variation is captured by the model. Our value of 0.36 seems low and therefore the amount of variance in the dependent variable that the independent variables explain collectively is not very large. 
+
+The $R^2$ tends to optimistically estimate the fit of the regression and always increases when more predictors are added. The Adjusted $R^2$ on the other hand is used to determine how reliable the correlation is and  increases when the new added predictors improve the model more than would be expected by chance. We will therefore use the adjusted $R^2$ as the criterion of goodness of the fit. In the previously trained model, the adjusted $R^2$ is very close to the standard $R^2$.
+
+To check the multicollinearity in our data we will look at the Variance Inflation Factors (VIF):
+
+```{r, message = FALSE}
+vif(lm_mult$finalModel) 
+```
+
+VIFs for Discount and Gross Margin are already moderately high. Since Gross Margin was calculated using the profit and the sales, we choose to keep Discount since it could provide more relevant and unique information.
+
+Let's now have a look at the diagnostic plots.
+
+```{r, message = FALSE, fig.height=10, fig.width=10, dev = "png", dpi = 300}
+model = lm(Profit ~ Sales + Quantity + Segment + Discount + Processing.Time + Ship.Mode + Region + Sub.Category, data = train)
+par(mfrow=c(2,2))
+plot(model)
+```
+
+*Fitted vs Residual graph*<br>
+The red line is close to zero (except slightly for the rightmost values), which means the assumption of linearity holds. However the spread of the residuals should be approximately the same across the x axis, but it is not, meaning there is heteroskedasticity.
+
+*Normal Q-Q Plot*<br>
+Most of the points lie in the line as expected, except for the ones at the beginning and the end (left and right skewness). There is some room for improvement here. Nevertheless, this would not represent a big problem, since given the size of our test set, the Central Limit Theorem can be invoked. 
+
+*Scale-Location*<br>
+The red line is far from horizontal, showing the presence of heteroskedasticity.
+
+*Residuals vs Leverage*<br>
+The spread of standardized residuals changes as a function of leverage, being more spread for high leverage points. This is another proof of heteroskedasticity.
+
+
+### Lasso regression
+
+Let's also try to perform feature selection using Lasso regression. For that, we are going to take the initial model and determine which features are less important for it. 
+
+```{r, message = FALSE}
+profit <- train$Profit
+predictors <- data.matrix(train[, c("Sales", "Quantity", "Segment", "Discount", "Processing.Time", "Ship.Mode", "Region", "Sub.Category", "Gross.Margin")])
+```
+
+First, perform k-fold cross-validation to find optimal lambda value. The parameter alpha = 1 corresponds to lasso regression while alpha = 0 corresponds to ridge regression.
+
+```{r, message = FALSE, fig.height=5, fig.width=5, fig.align="center"}
+
+cv_model <- cv.glmnet(predictors, profit, alpha = 1)
+
+#find optimal lambda value that minimizes test MSE
+best_lambda <- cv_model$lambda.min
+best_lambda
+
+#produce plot of test MSE by lambda value
+plot(cv_model) 
+```
+
+Once the best lambda is determined we can use it to find the coefficients of the model.
+
+```{r, message = FALSE}
+best_model <- glmnet(predictors, profit, alpha = 1, lambda = best_lambda)
+coef(best_model)
+```
+
+We observe that *Ship.Mode*, *Processing.Time* and *Segment* are not significant for the model, therefore, we can confirm the results obtained previously.
+
+### Ridge regression
+
+For the sake of completeness we can also check what results we get with Ridge regression on our initial set of features.
+
+```{r, message = FALSE}
+profit <- train$Profit
+predictors <- data.matrix(train[, c("Sales", "Quantity", "Segment", "Discount", "Processing.Time", "Ship.Mode", "Region", "Sub.Category", "Gross.Margin")])
+```
+
+As with lasso regression, we find the best value of lambda:
+
+```{r, message = FALSE, fig.height=5, fig.width=5, fig.align="center"}
+#perform k-fold cross-validation to find optimal lambda value (alpha = 0 is ridge, alpha = 1 is lasso)
+cv_model <- cv.glmnet(predictors, profit, alpha = 0)
+
+#find optimal lambda value that minimizes test MSE
+best_lambda <- cv_model$lambda.min
+best_lambda
+
+#produce plot of test MSE by lambda value
+plot(cv_model) 
+```
+
+Find coefficients of the ridge model:
+
+```{r, message = FALSE}
+best_model <- glmnet(predictors, profit, alpha = 0, lambda = best_lambda)
+coef(best_model)
+```
+
+Here we must look for those features whose coefficients are close to zero. We see that *Ship.Mode*, *Processing.Time* and *Segment* are, but also *Gross.Margin* and even more *Sales*. However, before discarding *Sales* we will check interaction and nonlinear terms.
+
+### Interaction terms
+
+Next we are going to check some interaction terms that could potentially have a positive impact on the performance of the model. To determine if an interaction term should be included or not we will check that its p-value is lower than 0.05, its VIF is not bigger than 3 and that there is an increase in the adjusted $R^2$. Finally we will test with ANOVA if the inclusion of the term results in a better model.  
+
+```{r, message = FALSE}
+# Interactions to check:
+# Sales:Quantity -----> No improvement in the model
+# Sales:Discount -------------> Increases a lot the adjusted R squared, good. Vif also okay
+# Ship.Mode:Processing.Time --------------- No improvement
+# Sales:Sub.Category -------- Adjusted R squared increases but vif factors are not good.
+# Sales:Segment -----------------------> Slight increase in R^2 and vif factors, but still okay. Won't take, since doesn't improve R so much.
+# Region:Sales ---->   Increases a bit the adjusted R squared but also vif factors, so better not to take.
+
+lm_mult.fit <- lm(Profit ~ Sales + Quantity + Segment + Gross.Margin + Processing.Time + Sales:Discount + Ship.Mode + Region + Sub.Category , data = train)
+summary(lm_mult.fit)
+vif(lm_mult.fit)
+```
+
+Based on the results for different models we keep the interaction between Sales and Discount. It makes the adjusted $R^2$ increase significantly while keeping a good p-value and VIF. With the inclusion of this term, we realize that having *Gross.Margin* instead of *Discount* improves the adjusted $R^2$, thus we use it instead.
+
+We can use ANOVA test to study if the inclusion of Sales:Discount results in a superior model as compared to the previous one.
+
+The null hypothesis is that the two models fit the data equally well, and the alternative hypothesis is that the full model is superior.
+
+```{r, message = FALSE}
+lm_mult.fit2 <- lm(Profit ~ Sales + Sales:Discount + Quantity + Segment + Gross.Margin + Processing.Time + Ship.Mode + Region + Sub.Category , data = train)
+lm_mult.fit <- lm(Profit ~ Sales + Quantity + Segment + Discount + Processing.Time + Ship.Mode + Region + Sub.Category , data = train)
+anova(lm_mult.fit , lm_mult.fit2)
+```
+
+<br>
+The big F and zero p-value are strong evidences of the fact that including the interaction term between *Sales* and *Discount* makes the model better.
+
+### Nonlinear terms
+
+Next step is to check nonlinear terms. Similar to the previous case, we go over different nonlinear term candidates to include in our model and base the choice on the p-value, VIF and the adjusted $R^2$.
+
+```{r, message = FALSE}
+# Quantity^2 -----> Good pvalue but high vif factor and no improvement of R
+# Discount^2 ------------> high pvalue
+# Poly(Sales, 3) ------------>  good pvalue and increase in R, no problem with vif
+# Poly(Quantity,5) ------------> Nope, only Quantity^2 p-value is good, and we have seen before vif are high
+# log(sales) ------------> adding this term to Sales has a good p value, but no improvement on R. Replacing the Sales by log(Sales) very bad R^2
+# sqrt(Sales) ------------> same as with log(sales)
+# log(Quantity) ------------> same problem with log(sales) but anova shows is not that good
+# sqrt(Quantity) ------------> same as log(quantity) but with pvalue in anova 3%
+#sqrt(Gross.Margin) ------------> good p-value, good increase in adjusted R, good vif
+
+lm_mult.fit <- lm(Profit ~ poly(Sales, 3) + Sales:Discount + Segment + Gross.Margin + Processing.Time + Ship.Mode + Region + Sub.Category , data = train)
+summary(lm_mult.fit)
+vif(lm_mult.fit)
+```
+
+Taking second and third order terms of sales increases the adjusted $R^2$. It shows also a low p-value and no problem with multicollinearity.  
+
+Let's use ANOVA test to study Poly(Sales, 3). The null hypothesis is that the two models fit the data equally well, and the alternative hypothesis is that the model including the nonlinear term is superior.
+
+```{r, message = FALSE}
+lm_mult.fit2 <- lm(Profit ~ poly(Sales, 3) + Quantity + Segment + Gross.Margin + Processing.Time + Ship.Mode + Region + Sub.Category , data = train)
+lm_mult.fit <- lm(Profit ~ Sales + Quantity + Segment + Gross.Margin + Processing.Time + Ship.Mode + Region + Sub.Category , data = train)
+
+anova(lm_mult.fit , lm_mult.fit2)
+```
+
+<br>
+There is clear evidence that the model which includes the nonlinearity on *Sales* performs better than that that doesn't include it.
+
+
+### Final variable selection
+
+Based on previous analysis of Lasso and Ridge regression, interaction terms and nonlinear terms let's create a new model selecting the most important variables and train it using 5-fold cross validation.
+
+```{r, message = FALSE, fig.height=10, fig.width=10, dev = "png", dpi = 300}
+lm_mult = train(
+  form = Profit ~ poly(Sales,3) + Sales:Discount + Sub.Category + Gross.Margin,
+  data = train,
+  trControl = trainControl(method = "cv", number = 5),
+  method = "lm")
+
+summary(lm_mult)
+```
+
+The feature *Region* has been finally dropped because it was found to have a high p-value in the new model. The F-statistic of this model is more than 10 orders of magnitudes bigger than that of the initial model which means that the predictors in our final model are very related to the response. The final adjusted $R^2$ is equal to 0.83, which is a quite high value and reflects the power of the model.
+
+Check for multicollinearity:
+
+```{r, message = FALSE, fig.height=10, fig.width=10, dev = "png", dpi = 300}
+vif(lm_mult$finalModel)
+```
+
+There is no multicollinearity among the final chosen features. Let's then analyze the diagnostic plots.
+
+```{r, message = FALSE, fig.height=10, fig.width=10, dev = "png", dpi = 300}
+par(mfrow=c(2,2))
+plot(lm_mult$finalModel)
+```
+
+*Fitted vs Residual graph*<br>
+The red line is a little further from zero than in the initial model, indicating that there is less linearity, especially for values far to the right and far to the left. The spread of the residuals is not approximately the same across the x axis, indicating the presence of heteroskedasticity.
+
+*Normal Q-Q Plot*<br>
+Very similar to the plot for the initial model. But as said before, this would not represent a big problem, since given the size of our test set, the Central Limit Theorem can be invoked.
+
+*Scale-Location*<br>
+The red line is far from horizontal, confirming the presence of heteroskedasticity.
+
+*Residuals vs Leverage*<br>
+The spread of standardized residuals changes as a function of leverage, being more spread for high leverage points. This is another proof of heteroskedasticity. There are three outliers that are found beyond Cook's distance.
+
+In the face of heteroskedasticity, we still have unbiased parameter estimates but we can't trust the values of their variance.
+
+Finally let's use the final model to predict on the test set and calculate the RMSE.
+
+```{r, message = FALSE}
+pred <- predict(lm_mult, newdata = test)
+rmse <- sqrt(sum((pred - test$Profit)^2)/length(test$Profit))
+normalized_rmse <- 100 * rmse/(max(train$Profit)-min(train$Profit))
+cat(paste("RMSE =", rmse))
+cat(paste("\nNormalized RMSE =", normalized_rmse, "%"))
+```
+
+Even though a RMSE of 92 may seem high we need to look at the range of our response variable and normalize the RMSE to get a better sense of the meaning of the MSE. The normalized RMSE is 0.6%, which is a low enough error for the purposes of our model. 
+
+Finally let's have a look at the *Profit* vs *Prediction* plot. As expected all values are around a slope 1 line.
+
+```{r, message = FALSE, fig.height=5, fig.width=5, fig.align="center"}
+Profit <- test$Profit
+Prediction <- pred
+plot(Profit, Prediction)
+```
+
+## Classification
+
+In this section we will address a binary classification problem. The idea is to make the column *Profit* a binary column, so that all positive profits get label *Positive* and all negative profits get label *Negative*. By doing this we can train a model that is able to predict if a purchase will result in positive or negative profit based on features such as Region, State, City, Sub-Category, Segment, Ship.Mode, Sales, Quantity, Discount and Process time.
+
+As a first step let us define a function to compute the most typical evaluation metrics: accuracy, precision, recall and F1 score.
+
+```{r, message = FALSE}
+calc_metrics <- function(cm) {
+
+  n = sum(cm) # number of instances
+  nc = nrow(cm) # number of classes
+  diag = diag(cm) # number of correctly classified instances per class 
+  rowsums = rowSums(cm) # number of instances per class
+  colsums = colSums(cm) # number of predictions per class
+  p = rowsums / n # distribution of instances over the actual classes
+  q = colsums / n # distribution of instances over the predicted classes
+
+  accuracy = sum(diag) / n
+  precision = diag / colsums 
+  recall = diag / rowsums 
+  f_1 = 2 * precision * recall / (precision + recall) 
+   
+  print(paste("Accuracy", accuracy))
+  print("Precision: ")
+  print(precision)
+  print("Recall: ")
+  print(recall)
+  print("F1 score: ")
+  print(f_1)
+
+}
+```
+
+The column *Profit* is then modified and the discrete value features are converted to factors.
+
+```{r, message = FALSE}
+df_log <- df[, c("Profit","Discount", "Quantity", "Sales", "Segment", "Ship.Mode", "Region", "Order.Month", "Processing.Time", "Sub.Category", "Order.Year")]
+df_log["Profit"]<-replace(df_log["Profit"], df["Profit"] < 0, "Negative")
+df_log["Profit"]<-replace(df_log["Profit"], df["Profit"] >= 0, "Positive")
+df_log[,"Profit"]<- as.factor(df_log[,"Profit"])
+df_log[,"Segment"]<- as.factor(df_log[,"Segment"])
+df_log[,"Ship.Mode"]<- as.factor(df_log[,"Ship.Mode"])
+df_log[,"Region"]<- as.factor(df_log[,"Region"])
+df_log[,"Sub.Category"]<- as.factor(df_log[,"Sub.Category"])
+```
+
+Let's check for unbalance in the data.
+
+```{r, message = FALSE}
+table(df_log$Profit)
+prop.table(table(df_log$Profit))
+contrasts(df_log$Profit)
+```
+
+As we can see there is a moderate unbalance in our data. We are going to tackle this problem by undersampling and oversampling accordingly. But first let's see what results we get with the unbalanced data. The train-test split is done taking as training all examples corresponding to the years 2014, 2015 and 2016, leaving 2017 as the test set.
+
+```{r, message = FALSE}
+train <- (df_log$Order.Year < 2017)
+df_trn <- df_log[train, ]
+df_tst <- df_log[!train, ]
+dim(df_tst)
+Profit.2017 <- df_log$Profit[!train]
+```
+
+### Feature selection
+
+Before training the model feature selection is done to avoid overfitting and thus ensure better results. The methodology followed to select the best features is based on the comparison of the AIC and the McFadden's $R^{2}$ for different trained linear models obtained by suppressing features one at a time.
+
+The Akaike Information Criterion (AIC) is a mathematical method for evaluating how well a model fits the data it was generated from. We use it to compare different models and determine which one fits the data better. The best-fit model according to AIC is the one that explains the greatest amount of variation using the fewest possible independent variables. It is based on the number of independent variables **K** and the log-likelihood estimate **L** according to the expression:
+
+$$
+AIC = 2K - 2ln(L)
+$$
+
+Usually, when comparing two models, a difference of more than 2 in their AIC value is enough to say the model with the lower AIC is better.
+
+Since GLM models use a maximum likelihood estimator, there is no minimization of the squared error and hence no *R* is calculated. There are a large number of pseudo-$R^{2}$ for GLMs, among which the most popular is McFadden's $R^2$. It is calculated as:
+
+$$R^{2} = 1 - \frac{Residual Deviance}{Null Deviance}$$ We will therefore look for models that present a bigger McFadden's $R^{2}$.
+
+```{r, message = FALSE}
+# Let's try now doing the same but with less variables (The ones with higher p value in the full fitted model)
+
+# glm.fits1 <- glm(Profit ~  Discount + Quantity + Sales + Ship.Mode + Sub.Category , data = df_trn, family = binomial)
+# glm.fits2 <- glm(Profit ~  Discount + Quantity + Sales + Ship.Mode +  Processing.Time , data = df_trn, family = binomial)
+# glm.fits3 <- glm(Profit ~  Discount + Sales +  Sub.Category , data = df_trn, family = binomial)
+# glm.fits4 <- glm(Profit ~  Discount + Quantity + Sales + Ship.Mode + Region + Processing.Time + Sub.Category , data = df_trn, family = binomial)
+# glm.fits5 <- glm(Profit ~  Discount + Sales  + Processing.Time + Sub.Category , data = df_trn, family = binomial)
+# glm.fits6 <- glm(Profit ~  Discount + Quantity + Sales + Region + Processing.Time + Sub.Category , data = df_trn, family = binomial)
+# glm.fits7 <- glm(Profit ~  Discount + Quantity + Sales + Ship.Mode + Region + Order.Month + Processing.Time + Sub.Category , data = df_trn, family = binomial)
+# glm.fits8 <- glm(Profit ~  Discount +  Processing.Time + Sub.Category , data = df_trn, family = binomial)
+# glm.fits9 <- glm(Profit ~  Discount + Sales + Processing.Time + Sub.Category , data = df_trn, family = binomial)
+# glm.fits10 <- glm(Profit ~ Quantity + Sales + Ship.Mode + Region + Order.Month + Processing.Time + Sub.Category , data = df_trn, family = binomial)
+
+
+glm.fits1 <- glm(Profit ~  Discount + Quantity + Sales + Segment + Ship.Mode + Region + Order.Month + Processing.Time + Sub.Category , data = df_trn, family = binomial)
+# glm.fits2 <- glm(Profit ~  Discount +  Sales + Ship.Mode + Region + Processing.Time , data = df_trn, family = binomial) # Subcategory is important
+glm.fits3 <- glm(Profit ~  Discount + Sales + Ship.Mode + Region +  Sub.Category , data = df_trn, family = binomial)
+glm.fits4 <- glm(Profit ~  Discount + Sales +  Ship.Mode + Region  + Processing.Time + Sub.Category , data = df_trn, family = binomial)
+# glm.fits5 <- glm(Profit ~  Discount +  Sales +  Ship.Mode + Processing.Time + Sub.Category , data = df_trn, family = binomial) # Region seems to be important
+# glm.fits6 <- glm(Profit ~  Discount + Sales +  Region + Processing.Time + Sub.Category , data = df_trn, family = binomial)
+# glm.fits7 <- glm(Profit ~  Discount +  Sales + Ship.Mode + Region + Processing.Time + Sub.Category , data = df_trn, family = binomial)
+glm.fits8 <- glm(Profit ~  Discount +  Ship.Mode + Region + Processing.Time + Sub.Category , data = df_trn, family = binomial)
+# glm.fits9 <- glm(Profit ~  Discount + Sales +  Ship.Mode + Region + Processing.Time + Sub.Category , data = df_trn, family = binomial)
+# glm.fits10 <- glm(Profit ~  Quantity + Sales +  Ship.Mode + Region + Order.Month + Processing.Time + Sub.Category , data = df_trn, family = binomial) # Discount is very important
+```
+
+```{r, message = FALSE}
+print(paste("AIC1: ", extractAIC(glm.fits1)[2]))
+print(paste("McFadden's R^2  ", with(summary(glm.fits1), 1 - deviance/null.deviance)))
+
+# print(paste("AIC2: ", extractAIC(glm.fits2)[2]))
+# print(paste("McFadden's R^2  ", with(summary(glm.fits2), 1 - deviance/null.deviance)))
+
+print(paste("AIC3: ", extractAIC(glm.fits3)[2]))
+print(paste("McFadden's R^2  ", with(summary(glm.fits3), 1 - deviance/null.deviance)))
+
+print(paste("AIC4: ", extractAIC(glm.fits4)[2]))
+print(paste("McFadden's R^2  ", with(summary(glm.fits4), 1 - deviance/null.deviance)))
+
+# print(paste("AIC5: ", extractAIC(glm.fits5)[2]))
+# print(paste("McFadden's R^2  ", with(summary(glm.fits5), 1 - deviance/null.deviance)))
+
+# print(paste("AIC6: ", extractAIC(glm.fits6)[2]))
+# print(paste("McFadden's R^2  ", with(summary(glm.fits6), 1 - deviance/null.deviance)))
+
+# print(paste("AIC7: ", extractAIC(glm.fits7)[2]))
+# print(paste("McFadden's R^2  ", with(summary(glm.fits7), 1 - deviance/null.deviance)))
+
+print(paste("AIC8: ", extractAIC(glm.fits8)[2]))
+print(paste("McFadden's R^2  ", with(summary(glm.fits8), 1 - deviance/null.deviance)))
+
+# print(paste("AIC9: ", extractAIC(glm.fits9)[2]))
+# print(paste("McFadden's R^2  ", with(summary(glm.fits9), 1 - deviance/null.deviance)))
+
+# print(paste("AIC10: ", extractAIC(glm.fits10)[2]))
+# print(paste("McFadden's R^2  ", with(summary(glm.fits10), 1 - deviance/null.deviance)))
+```
+
+Best features found are: Discount, Sales, Sub.Category, Processing.Time and Region. We choose only those five to keep the problem simple and because the addition of other features does not improve the performance of the model.
+
+### Logistic regression
+
+Logistic regression is the standard base classification algorithm when having linearly separable data. That's why we'll use it first to train our model. Furthermore, the use of 5-fold cross validation will give us better estimations of the performance of the model.
+
+#### Unbalanced Dataset and Crossvalidation
+
+```{r, message = FALSE}
+glm_mod = train(
+  form = Profit ~ Discount + Sales + Sub.Category + Region + Processing.Time,
+  data = df_trn,
+  trControl = trainControl(method = "cv", number = 5),
+  method = "glm",
+  family = "binomial"
+)
+
+glm_mod
+```
+
+```{r, message = FALSE}
+summary(glm_mod)
+```
+
+Check McFadden's $R^2$.
+
+```{r, message = FALSE}
+print("McFadden's R^2")
+with(summary(glm_mod), 1 - deviance/null.deviance)
+```
+
+Predict and display confusion matrix.
+
+```{r, message = FALSE}
+glm.probs <- predict(glm_mod, df_tst)
+levels = c("Positive", "Negative")
+cm <- as.matrix(table(glm.probs , Profit.2017)[levels,levels])
+cm
+```
+
+Calculate evaluation metrics:
+
+```{r, message = FALSE}
+calc_metrics(cm)
+roc.curve(Profit.2017, glm.probs, plotit = F)
+```
+
+#### Balanced Dataset and Crossvalidation
+
+Now we'll balance the dataset to determine if the classification improves for balanced data. Two approaches are used: a synthetic method and a sampling method.
+
+Library *ROSE* ( Random Over Sampling Examples) is used to generate artificial data based on sampling methods and smoothed bootstrap approach and has been proved to yield better results than traditional sampling methods in many situations. It is therefore a type of oversampling technique.
+
+On the other hand, the package *ovun.sample* is used to perform oversampling and undersampling in one go. The results will be compared to the synthetic method approach.
+
+```{r, message = FALSE}
+balanced_data <- ROSE(Profit ~ ., data = df_trn, seed = 1)$data
+table(balanced_data$Profit)
+contrasts(balanced_data$Profit)
+```
+
+We can see the data is now balanced with more or less the same amount of examples in each class. Now we train the model using 5-fold crossvalidation.
+
+```{r, message = FALSE}
+glm_fits = train(
+  form = Profit ~ Discount + Sales + Sub.Category + Region + Processing.Time,
+  data = balanced_data,
+  trControl = trainControl(method = "cv", number = 5),
+  method = "glm",
+  family = "binomial"
+)
+
+glm_fits
+```
+
+```{r, message = FALSE}
+summary(glm_fits)
+```
+
+Check McFadden's $R^2$.
+
+```{r, message = FALSE}
+with(summary(glm_fits), 1 - deviance/null.deviance)
+```
+
+Predict and display confusion matrix.
+
+```{r, message = FALSE}
+glm.probs <- predict(glm_fits , df_tst)
+levels = c("Positive", "Negative")
+cm <- as.matrix(table(glm.probs, Profit.2017)[levels,levels])
+cm
+
+```
+
+Calculate evaluation metrics:
+
+```{r, message = FALSE}
+calc_metrics(cm)
+roc.curve(Profit.2017, glm.probs, plotit = F)
+```
+
+Let's now see how the package *ovun.sample* performs compared to the previous approach. Here, we can choose to do only oversampling, only undersampling or a mix of the two. We choose a mix of the two by imposing p = 0.5, so that we end up with a 50% probability of positive class in the resulting balanced data.
+
+```{r, message = FALSE}
+balanced_data <- ovun.sample(Profit ~ ., data = df_trn, method = "both", p=0.5, N = nrow(df_trn), seed = 1)$data # Can play with parameter p: probability of positive class in newly generated sample
+table(balanced_data$Profit)
+```
+
+Train the model using 5-fold crossvalidation.
+
+```{r, message = FALSE}
+glm_fits = train(
+  form = Profit ~ Discount + Sales + Sub.Category + Region + Processing.Time,
+  data = balanced_data,
+  trControl = trainControl(method = "cv", number = 5),
+  method = "glm",
+  family = "binomial"
+)
+
+glm_fits
+```
+
+```{r, message = FALSE}
+summary(glm_fits)
+```
+
+Check McFadden's $R^2$.
+
+```{r, message = FALSE}
+with(summary(glm_fits), 1 - deviance/null.deviance)
+```
+
+Predict and display confusion matrix.
+
+```{r, message = FALSE}
+glm.probs <- predict(glm_fits , df_tst)
+levels = c("Positive", "Negative")
+cm <- as.matrix(table(glm.probs, Profit.2017)[levels,levels])
+cm
+```
+
+Calculate evaluation metrics:
+
+```{r, message = FALSE}
+calc_metrics(cm)
+roc.curve(Profit.2017, glm.probs, plotit = F)
+```
+
+Let's do a quick comparison of the results for the unbalanced logistic regression and the two approaches followed to balance the data.
+
+```{r echo = FALSE}
+Method <- c("AIC"," McFadden's R^2", "Accuracy", "Precision", "Recall", "F1 score", "AUC")
+Unbalanced <- c(1541.2 , 0.77, 0.94, 0.98, 0.95, 0.97, 0.87)
+ROSE <- c(2856.6 , 0.70, 0.92, 0.92, 0.99, 0.95, 0.94)
+Ovun.sample <- c(1960.9, 0.79, 0.92, 0.92, 0.98, 0.95, 0.93)
+
+#Unbalanced <- c(1541.2 , 0.77, c(0.94,0.76), c(0.98,0.91), c(0.95,0.83), 0.97, 0.87 )
+#ROSE <- c(2856.6 , 0.70, c(0.92,0.95), c(0.92,0.73), c(0.99,0.83), 0.95, 0.94 )
+#Ovun.sample <- c(1960.9, 0.79, c(0.92,0.95), c(0.92,0.73), c(0.98,0.82), 0.95, 0.93)
+
+df_show <- data.frame(Method, Unbalanced, ROSE, Ovun.sample)
+
+df_show %>%
+  kbl() %>%
+  kable_classic(full_width = F)
+
+```
+
+We can see the unbalanced model performs actually really well as compared to the other models. It's AIC is the lowest, while the evaluation metrics are close to the models trained with balanced data. However, the AUC score is higher for balanced data.
+
+Both *Ovun.sample* and *ROSE* have a similar performance as well, but the lower AIC and higher McFadden's $R^2$ would make us choose the former over the latter.
+
+### Bayes classifier with Crossvalidation
+
+Next we will try a naive Bayes classifier to compare to our logistic regression model. We use the unbalanced data since it proved to perform well with logistic regression.
+
+```{r, message = FALSE}
+nb_mod = train(
+  form = Profit ~ Discount + Processing.Time + Sales + Region,
+  data = df_trn,
+  trControl = trainControl(method = "cv", number = 5),
+  method = "nb"
+)
+
+nb_mod
+```
+
+Unlike the previous models, here we have dropped the feature *Sub.Category* given an error in the training. We think the reason is the completeness of the data for this feature, in the sense that some Sub-Categories have one or very few points. 
+
+Predict and display confusion matrix:
+
+```{r, message = FALSE}
+nb.probs <- predict(nb_mod, df_tst)
+levels = c("Positive", "Negative")
+cm <- as.matrix(table(nb.probs , Profit.2017)[levels,levels])
+cm
+```
+
+```{r, message = FALSE}
+calc_metrics(cm)
+roc.curve(Profit.2017, nb.probs, plotit = F)
+```
+
+The evaluation metrics are quite similar to those of logistic regression. Based on the slightly bigger AUC score of logistic regression we would choose that model over the naive Bayes classifier. 
+
+### Linear discriminant analysis
+
+Here we will use linear discriminant analysis to classify and model the unbalanced data. We also want to determine if it performs better than logistic regression and naive Bayes.
+
+```{r, message = FALSE}
+lda_mod = train(
+  form = Profit ~ Discount + Sales + Region + Processing.Time + Sub.Category,
+  data = df_trn,
+  trControl = trainControl(method = "cv", number = 5),
+  method = "lda"
+)
+
+lda_mod
+```
+
+Predict and display confusion matrix.
+
+```{r, message = FALSE}
+lda.probs <- predict(lda_mod, df_tst)
+levels = c("Positive", "Negative")
+cm <- as.matrix(table(lda.probs , Profit.2017)[levels,levels])
+cm
+```
+
+Calculate evaluation metrics:
+
+```{r, message = FALSE}
+calc_metrics(cm)
+roc.curve(Profit.2017, lda.probs, plotit = F)
+```
+
+The evaluation metrics are as good as those for linear regression and Bayes classifier on unbalanced data.
+
+### Quadratic discriminant analysis
+
+Finally,for the sake of completeness we use quadratic discriminant analysis to train the classification model. 
+
+```{r, message = FALSE}
+qda_mod = train(
+  form = Profit ~ Discount + Sales + Region + Processing.Time,
+  data = df_trn,
+  trControl = trainControl(method = "cv", number = 5),
+  method = "qda"
+)
+
+qda_mod
+```
+
+In the same way as with the Bayes classifier, we have dropped the feature *Sub.Category* given an error in the training. 
+
+Predict and display confusion matrix:
+
+```{r, message = FALSE}
+qda.probs <- predict(qda_mod, df_tst)
+levels = c("Positive", "Negative")
+cm <- as.matrix(table(qda.probs , Profit.2017)[levels,levels])
+cm
+```
+
+Calculate evaluation metrics:
+
+```{r, message = FALSE}
+calc_metrics(cm)
+roc.curve(Profit.2017, qda.probs, plotit = F)
+```
+
+Again, this model behaves similarly to the previously trained one on the unbalanced data. The AUC score is good enough to say the model achieves a good classification performance. 
