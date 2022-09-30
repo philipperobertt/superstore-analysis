@@ -1,1 +1,1 @@
-# superstore-analysis
+# Analyzing a Superstore dataset in USA
